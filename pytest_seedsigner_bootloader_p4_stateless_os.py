@@ -3,7 +3,8 @@
 #
 # Pytest integration test for the SeedSigner Stateless Bootloader (ESP32-P4).
 #
-# Matches the boot chain in main/main.c:
+# Matches the boot chain in the loader modules (main/storage.c, main/main.c,
+# main/esp_image.c, main/jump.c — see docs/code_structure.md):
 #   1. SD-card load: mounts FAT32 /sdcard, reads seedsigner_esp32p4.bin into
 #      PSRAM, unmounts immediately (TOCTOU-safe)
 #   2. Specter secure app loader: bl_section header + platform attr + version

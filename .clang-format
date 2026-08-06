@@ -1,0 +1,41 @@
+# Matches the existing loader style: 4-space indent, Allman braces on function
+# definitions, attached braces on control statements, right-aligned pointers.
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+ContinuationIndentWidth: 4
+UseTab: Never
+ColumnLimit: 100
+TabWidth: 4
+
+# Functions get their own line for the opening brace; if/for/while/switch keep
+# the brace on the same line as the keyword.
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterClass: true
+  AfterStruct: true
+  AfterEnum: true
+  AfterUnion: true
+  AfterNamespace: false
+  AfterControlStatement: Never
+  AfterCaseLabel: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: false
+
+SpaceBeforeParens: ControlStatements
+AllowShortFunctionsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: false
+
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+PointerAlignment: Right
+DerivePointerAlignment: false
+
+IndentCaseLabels: false
+SortIncludes: Never
+IncludeBlocks: Preserve

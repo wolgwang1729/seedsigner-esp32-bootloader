@@ -98,3 +98,11 @@ This builds the loader, flashes the bootloader, partition table, and loader
 (secure-boot signed) to the board at 921600 baud, and opens the serial monitor.
 Default port is `/dev/ttyACM0`; override with `ESPPORT=...`. Wait for the
 anti-phishing words and the MicroPython REPL prompt (`>>>`).
+
+## Repository layout
+
+See [`docs/code_structure.md`](docs/code_structure.md) for the module map and
+boot-chain data flow. In short: `main/main.c` orchestrates; `main/storage.c`
+reads the SD bundle, `main/esp_image.c` parses the ESP32 image into a load
+plan, and `main/jump.c` performs the bare-metal MMU/copy/jump sequence. Vendor
+keys are compiled in from `keys/<profile>/`.
