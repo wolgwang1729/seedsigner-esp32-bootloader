@@ -9,6 +9,10 @@ dependencies.lock
 # Managed components
 managed_components/
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Secure boot signing key — dev-only, never commit. Generate your own with:
 #   espsecure.py generate_signing_key secure_boot_signing_key.pem
 secure_boot_signing_key.pem

@@ -6,8 +6,9 @@ Stateless secure bootloader for the SeedSigner ESP32-P4. Boot chain:
    eFuse-stored key digest on every boot.
 2. **Loader** (`seedsigner_secure_loader.bin`) - mounts the SD card, reads
    `seedsigner_esp32p4.bin`, verifies its secp256k1 multisig signature against
-   `vendor_keys[]` compiled into the loader, shows an anti-phishing proof, then
-   loads and jumps to the MicroPython firmware from PSRAM.
+   `vendor_keys[]` (compiled in from `keys/<profile>/vendor_keys.c`), shows an
+   anti-phishing proof, then loads and jumps to the MicroPython firmware from
+   PSRAM.
 
 Two independent key pairs protect this chain:
 
@@ -42,14 +43,26 @@ eFuse and checked at every boot. `sdkconfig.defaults` already references it via
 ## Layer 2: Vendor payload signing key (ECDSA secp256k1)
 
 ```bash
-python3 tools/generate_vendor_key.py
+python3 tools/generate_vendor_key.py [--profile test|production]
 ```
 
-This generates `payload_signing_key.pem` (gitignored) and prints the matching
-`vendor_keys[]` C array. **Copy that array into `main/main.c`** - the loader
-verifies the SD payload against this public key, so the firmware won't boot
-until the two match. If you regenerate the key, you must also update
-`main/main.c` and rebuild the loader.
+This generates `payload_signing_key.pem` (gitignored) and writes the matching
+`vendor_keys[]` C file to `keys/<profile>/vendor_keys.c`. The loader verifies
+the SD payload against this public key, so the two must match or the firmware
+won't boot.
+
+The key profile selects which keys file the build compiles:
+
+```bash
+# test is the default profile (dev only)
+idf.py build
+# production keys (hold the private key offline!)
+VENDOR_KEYS_PROFILE=production idf.py build
+```
+
+If you regenerate the key, `keys/<profile>/vendor_keys.c` is rewritten
+automatically — just rebuild the loader. `tools/generate_signed_payload.py`
+warns if the payload signing key doesn't match the compiled keys file.
 
 ## Building the MicroPython firmware (SD payload)
 
