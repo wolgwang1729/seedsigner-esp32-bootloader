@@ -1,0 +1,113 @@
+import hashlib
+from ecdsa import SigningKey, SECP256k1
+from ecdsa.util import sigencode_string
+import struct
+import bech32
+import os
+
+BL_SECT_MAGIC = 0x54434553
+BL_SECT_STRUCT_REV = 1
+
+def crc32_fast(data):
+    import zlib
+    return zlib.crc32(data) & 0xFFFFFFFF
+
+def pack_attribute(key, value):
+    if isinstance(value, str):
+        value = value.encode('ascii')
+    elif isinstance(value, int):
+        if value < 256:
+            value = struct.pack('<B', value)
+        elif value < 65536:
+            value = struct.pack('<H', value)
+        else:
+            value = struct.pack('<I', value)
+    return struct.pack('<BB', key, len(value)) + value
+
+def build_section(name, version, payload, attributes=b''):
+    attr_list = attributes + b'\x00' * (216 - len(attributes))
+    pl_size = len(payload)
+    pl_crc = crc32_fast(payload) if pl_size > 0 else 0
+    fmt = '<II16sIII216s'
+    header = struct.pack(fmt,
+                         BL_SECT_MAGIC,
+                         BL_SECT_STRUCT_REV,
+                         name.encode('ascii'),
+                         version,
+                         pl_size,
+                         pl_crc,
+                         attr_list)
+    struct_crc = crc32_fast(header)
+    header += struct.pack('<I', struct_crc)
+    return header + payload
+
+# Vendor signing key (private, gitignored — payload_signing_key.pem). Override
+# the path with the VENDOR_SIGNING_KEY env var if the key lives elsewhere.
+# Must match the vendor_keys[] public key compiled into the loader (main/main.c).
+KEY_PATH = os.environ.get(
+    "VENDOR_SIGNING_KEY",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "payload_signing_key.pem"),
+)
+
+with open(KEY_PATH, "rb") as f:
+    priv_key = SigningKey.from_pem(f.read())
+pub_key = priv_key.get_verifying_key()
+pub_bytes = pub_key.to_string("uncompressed")
+print("const bl_pubkey_t vendor_keys[] = {")
+print("    { .bytes = { " + ", ".join(f"0x{b:02x}" for b in pub_bytes) + " } },")
+print("    BL_PUBKEY_END_OF_LIST\n};")
+
+# Fingerprint: first 16 bytes of single sha256 of pubkey
+fp = hashlib.sha256(pub_bytes).digest()[:16]
+
+import sys
+
+if len(sys.argv) < 3:
+    print("Usage: python generate_signed_payload.py <input.bin> <output.bin>")
+    sys.exit(1)
+
+with open(sys.argv[1], 'rb') as f:
+    payload = f.read()
+
+def version_to_sig_str(version):
+    major = version // (100 * 1000 * 1000)
+    minor = (version // (100 * 1000)) % 1000
+    patch = (version // 100) % 1000
+    rc_rev = version % 100
+    if rc_rev == 99:
+        return f"{major}.{minor}.{patch}"
+    else:
+        return f"{major}.{minor}.{patch}rc{rc_rev}"
+
+version = 1
+attrs = pack_attribute(4, "seedsigner_esp32p4") + pack_attribute(1, "secp256k1-sha256")
+main_section = build_section("main", version, payload, attrs)
+
+main_hash = hashlib.sha256(main_section).digest()
+digest2 = hashlib.sha256(main_hash).digest()
+hrp = version_to_sig_str(version) + "-"
+converted_bits = bech32.convertbits(digest2, 8, 5, pad=True)
+msg_str = bech32.bech32_encode(hrp, converted_bits)
+msg_bytes = msg_str.encode('ascii')
+
+prefix = b"\x18Bitcoin Signed Message:\n"
+len_byte = bytes([len(msg_bytes)])
+in_digest = hashlib.sha256(prefix + len_byte + msg_bytes).digest()
+btc_digest = hashlib.sha256(in_digest).digest()
+signature = priv_key.sign_digest_deterministic(btc_digest, sigencode=sigencode_string)
+r = int.from_bytes(signature[:32], 'big')
+s = int.from_bytes(signature[32:], 'big')
+order = SECP256k1.order
+if s > order // 2:
+    s = order - s
+signature = r.to_bytes(32, 'big') + s.to_bytes(32, 'big')
+
+sig_payload = fp + signature
+sig_section = build_section("sign", 1, sig_payload)
+
+with open(sys.argv[2], 'wb') as f:
+    f.write(main_section)
+    f.write(sig_section)
+print(f"Signed {sys.argv[2]} successfully!")
+
+

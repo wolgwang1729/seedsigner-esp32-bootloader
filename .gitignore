@@ -1,0 +1,18 @@
+# ESP-IDF build artifacts
+build/
+
+# Generated sdkconfig (regenerated from sdkconfig.defaults)
+sdkconfig
+sdkconfig.old
+dependencies.lock
+
+# Managed components
+managed_components/
+
+# Secure boot signing key — dev-only, never commit. Generate your own with:
+#   espsecure.py generate_signing_key secure_boot_signing_key.pem
+secure_boot_signing_key.pem
+
+# Vendor payload signing key — private, never commit. Generate with:
+#   python3 tools/generate_vendor_key.py
+payload_signing_key.pem
