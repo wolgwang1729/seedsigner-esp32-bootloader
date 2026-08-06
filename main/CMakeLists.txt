@@ -12,7 +12,7 @@ message(STATUS "Seedsigner loader: vendor keys profile = ${VENDOR_KEYS_PROFILE}"
 set(KEYS_DIR "${CMAKE_CURRENT_LIST_DIR}/../keys")
 
 idf_component_register(
-    SRCS "main.c" "storage.c" "esp_image.c" "anti_phish.c" "bip39_wordlist.c" "${KEYS_DIR}/${VENDOR_KEYS_PROFILE}/vendor_keys.c"
+    SRCS "main.c" "storage.c" "esp_image.c" "jump.c" "anti_phish.c" "bip39_wordlist.c" "${KEYS_DIR}/${VENDOR_KEYS_PROFILE}/vendor_keys.c"
     PRIV_INCLUDE_DIRS "${KEYS_DIR}"
     PRIV_REQUIRES esp_mm spi_flash esp_partition fatfs sdmmc specter_crypto
 )
