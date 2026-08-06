@@ -35,6 +35,8 @@
 // --- Loader modules ---
 #include "loader_config.h"
 #include "storage.h"
+#include "esp_image.h"
+#include "jump.h"
 
 // ==================== ESP32-P4 Memory Map ====================
 // The ESP32-P4 is a RISC-V dual-core SoC with a unified cache
@@ -67,41 +69,14 @@ static void crypto_progress_cb(void *ctx, bl_cbarg_t arg, uint32_t total, uint32
 }
 
 // ---------------------------------------------------------------------------
-// ESP32 image structures
-// ---------------------------------------------------------------------------
-typedef struct {
-    uint8_t  magic;
-    uint8_t  segment_count;
-    uint8_t  spi_mode;
-    uint8_t  spi_speed : 4;
-    uint8_t  spi_size  : 4;
-    uint32_t entry_addr;
-    uint8_t  wp_pin;
-    uint8_t  spi_pin_drv[3];
-    uint16_t chip_id;
-    uint8_t  min_chip_rev;
-    uint16_t min_chip_rev_full;
-    uint16_t max_chip_rev_full;
-    uint8_t  reserved[4];
-    uint8_t  hash_appended;
-} __attribute__((packed)) esp_image_header_t;
-
-typedef struct {
-    uint32_t load_addr;
-    uint32_t data_len;
-} esp_image_segment_header_t;
-
-// ---------------------------------------------------------------------------
 // State saved in RTC RAM — survives a software reset, not a power cycle
+// (types and externs in jump.h)
 // ---------------------------------------------------------------------------
-typedef struct { void *dest; void *src; uint32_t len; } pending_copy_t;
-typedef struct { uint32_t vaddr; uint32_t paddr; uint32_t len; } mmu_mapping_t;
-
-RTC_DATA_ATTR static pending_copy_t safe_copies[20];
-RTC_DATA_ATTR static int            safe_copy_count    = 0;
-RTC_DATA_ATTR static uint32_t       safe_entry_addr    = 0;
-RTC_DATA_ATTR static mmu_mapping_t  safe_mappings[20];
-RTC_DATA_ATTR static int            safe_mapping_count = 0;
+RTC_DATA_ATTR pending_copy_t safe_copies[MAX_DIRECT_COPIES];
+RTC_DATA_ATTR int            safe_copy_count    = 0;
+RTC_DATA_ATTR uint32_t       safe_entry_addr    = 0;
+RTC_DATA_ATTR mmu_mapping_t  safe_mappings[MAX_MMU_MAPPINGS];
+RTC_DATA_ATTR int            safe_mapping_count = 0;
 
 // Scratch buffer used to thrash the L1 D-cache before the jump. Relocated above
 // the payload region (0x4FF40000+) by loader_high.ld, so it can also be written
@@ -168,7 +143,7 @@ static void RTC_IRAM_ATTR dbg_print_hex(uint32_t val)
 // context-switch re-arms the monitor with the next task's bounds — and
 // (2) neutralize the guard: widen SP_MIN/SP_MAX to full range and clear the
 // SP-spill ENA bits (ASSIST_DEBUG_CORE_0_INTR_ENA_REG @ 0x3FF06000).
-static void __attribute__((naked)) do_mmu_mapping_and_jump_trampoline(void)
+void __attribute__((naked)) do_mmu_mapping_and_jump_trampoline(void)
 {
     asm volatile (
         "csrw mie, zero\n"
@@ -508,124 +483,21 @@ void app_main(void)
     }
 
     // ----------------------------------------------------------------
-    // Step 3: Validate raw ESP32 image header
+    // Steps 3-6: validate the raw ESP32 image and build the load plan
+    //   (header check, MMU footprint measure, fake-flash staging for
+    //   PSRAM-mapped segments, direct-to-SRAM copies).
+    // NOTE: psram_buf must NOT be freed — deferred copies still point into it.
     // ----------------------------------------------------------------
-    __attribute__((aligned(4))) esp_image_header_t hdr;
-    hdr = *(esp_image_header_t *)(psram_buf + payload_offset);
-
-    if (hdr.magic != 0xE9) {
-        ESP_LOGE(TAG, "Bad image magic: 0x%02X (expected 0xE9). Halting.", hdr.magic);
-        while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-    if (hdr.segment_count == 0 || hdr.segment_count > 16) {
-        ESP_LOGE(TAG, "Bad segment count: %d. Halting.", hdr.segment_count);
-        while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-    ESP_LOGI(TAG, "Image OK: %d segments, entry=0x%08lX",
-             hdr.segment_count, (unsigned long)hdr.entry_addr);
-
-    // ----------------------------------------------------------------
-    // Step 4: First pass — measure PSRAM MMU footprint
-    // ----------------------------------------------------------------
-    uint32_t max_offset = 0;
-    uint32_t offset     = sizeof(esp_image_header_t);
-
-    for (int i = 0; i < hdr.segment_count; i++) {
-        esp_image_segment_header_t seg;
-        memcpy(&seg, psram_buf + payload_offset + offset, sizeof(seg));
-        offset += sizeof(seg);
-        if (seg.data_len > MAX_FIRMWARE_SIZE) {
-            ESP_LOGE(TAG, "Segment %d bad length %lu. Halting.", i, (unsigned long)seg.data_len);
-            while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
-        }
-        if (seg.load_addr >= 0x48000000 && seg.load_addr < 0x4C000000) {
-            uint32_t end = (seg.load_addr - 0x48000000) + seg.data_len;
-            if (end > max_offset) max_offset = end;
-        }
-        offset += seg.data_len;
-    }
-    max_offset = (max_offset + 0xFFFF) & ~0xFFFF;
-    ESP_LOGI(TAG, "PSRAM MMU footprint: %lu bytes", (unsigned long)max_offset);
-
-    // ----------------------------------------------------------------
-    // Step 5: Allocate fake-flash staging buffer for mapped segments
-    // ----------------------------------------------------------------
-    uint8_t  *fake_flash  = NULL;
-    uint32_t  flash_paddr = 0;
-
-    if (max_offset > 0) {
-        fake_flash = heap_caps_aligned_alloc(65536, max_offset, MALLOC_CAP_SPIRAM);
-        if (!fake_flash) {
-            ESP_LOGE(TAG, "fake_flash alloc failed. Halting.");
-            while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
-        }
-        memset(fake_flash, 0, max_offset);
-
-        mmu_target_t target;
-        if (esp_mmu_vaddr_to_paddr(fake_flash, &flash_paddr, &target) != ESP_OK) {
-            ESP_LOGE(TAG, "paddr lookup for fake_flash failed. Halting.");
-            while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
-        }
-        ESP_LOGI(TAG, "fake_flash: vaddr=%p paddr=0x%08lX", fake_flash, (unsigned long)flash_paddr);
-    }
-
-    // ----------------------------------------------------------------
-    // Step 6: Second pass — place segments and build MMU map
-    // ----------------------------------------------------------------
-    offset = sizeof(esp_image_header_t);
-    mmu_mapping_t mmu_mappings[16];
-    int      mapping_count       = 0;
-    uint32_t last_page_start     = 0xFFFFFFFF;
-
-    for (int i = 0; i < hdr.segment_count; i++) {
-        esp_image_segment_header_t seg;
-        memcpy(&seg, psram_buf + payload_offset + offset, sizeof(seg));
-        offset += sizeof(seg);
-
-        ESP_LOGI(TAG, "Seg %d: addr=0x%08lX len=%lu",
-                 i, (unsigned long)seg.load_addr, (unsigned long)seg.data_len);
-
-        if (seg.load_addr >= 0x48000000 && seg.load_addr < 0x4C000000) {
-            // Mapped segment → stage into fake_flash
-            uint32_t va_start = seg.load_addr & ~0xFFFF;
-            uint32_t va_end   = (seg.load_addr + seg.data_len + 0xFFFF - 1) & ~0xFFFF;
-            if (seg.data_len == 0) va_end = va_start;
-
-            mmu_mappings[mapping_count].vaddr = va_start;
-            mmu_mappings[mapping_count].len   = va_end - va_start;
-            mmu_mappings[mapping_count].paddr = flash_paddr + (va_start - 0x48000000);
-
-            uint32_t write_off = seg.load_addr - 0x48000000;
-            memcpy(fake_flash + write_off, psram_buf + payload_offset + offset, seg.data_len);
-
-            uint32_t page_start = write_off & ~0xFFFF;
-            if (page_start != last_page_start) {
-                memcpy(fake_flash + page_start, psram_buf + payload_offset, 32); // image header at page start
-                last_page_start = page_start;
-            }
-            mapping_count++;
-            ESP_LOGI(TAG, "  -> fake_flash+0x%lX", (unsigned long)write_off);
-        } else {
-            // Direct segment → deferred copy into internal SRAM
-            safe_copies[safe_copy_count].dest = (void *)seg.load_addr;
-            safe_copies[safe_copy_count].src  = (void *)(psram_buf + payload_offset + offset);
-            safe_copies[safe_copy_count].len  = seg.data_len;
-            safe_copy_count++;
-            ESP_LOGI(TAG, "  -> direct copy to 0x%08lX", (unsigned long)seg.load_addr);
-        }
-        offset += seg.data_len;
-    }
-
-    Cache_WriteBack_Addr(0x10, (uint32_t)fake_flash, max_offset);
-    Cache_WriteBack_Addr(0x20, (uint32_t)fake_flash, max_offset);
+    image_plan_t plan = esp_image_plan(psram_buf, payload_offset);
 
     // ----------------------------------------------------------------
     // Step 7: Commit and jump
-    // NOTE: psram_buf must NOT be freed — deferred copies still point into it.
     // ----------------------------------------------------------------
-    safe_entry_addr = hdr.entry_addr;
-    for (int i = 0; i < mapping_count; i++) safe_mappings[i] = mmu_mappings[i];
-    safe_mapping_count = mapping_count;
+    safe_entry_addr = plan.entry_addr;
+    for (int i = 0; i < plan.mmu_mapping_count; i++) safe_mappings[i] = plan.mmu_mappings[i];
+    safe_mapping_count = plan.mmu_mapping_count;
+    for (int i = 0; i < plan.copy_count; i++) safe_copies[i] = plan.direct_copies[i];
+    safe_copy_count = plan.copy_count;
 
     ESP_LOGI(TAG, "Jumping to 0x%08lX ...", (unsigned long)safe_entry_addr);
     for (int i = 0; i < safe_copy_count; i++)
