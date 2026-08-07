@@ -1,11 +1,26 @@
-# Vendor keys profile: test (default) or production. Select with the
-# VENDOR_KEYS_PROFILE env var, e.g.:
-#   VENDOR_KEYS_PROFILE=production idf.py build
-# Mirrors cryptoadvance/specter-bootloader's keys/<profile> layout.
-if(DEFINED ENV{VENDOR_KEYS_PROFILE})
+# Vendor keys profile: test (default) or production. Mirrors
+# cryptoadvance/specter-bootloader's keys/<profile> layout.
+#
+# The profile is a CMake CACHE variable, set with -D so that switching it
+# always forces a reconfiguration (CMakeCache.txt is a configure dependency):
+#   idf.py -DVENDOR_KEYS_PROFILE=production build
+# A bare env var (VENDOR_KEYS_PROFILE=production idf.py build) is read only
+# at configure time and NEVER retriggers a reconfigure, so it would silently
+# keep the previously configured profile — the loader would ship the wrong
+# keys. The env var is therefore only used to seed the cache on a fresh
+# configure, and any later divergence is called out as a warning below.
+if(DEFINED ENV{VENDOR_KEYS_PROFILE} AND NOT DEFINED VENDOR_KEYS_PROFILE)
     set(VENDOR_KEYS_PROFILE "$ENV{VENDOR_KEYS_PROFILE}")
-else()
+endif()
+if(NOT DEFINED VENDOR_KEYS_PROFILE)
     set(VENDOR_KEYS_PROFILE "test")
+endif()
+set(VENDOR_KEYS_PROFILE "${VENDOR_KEYS_PROFILE}" CACHE STRING "Vendor keys profile (test|production)" FORCE)
+
+if(DEFINED ENV{VENDOR_KEYS_PROFILE} AND NOT "$ENV{VENDOR_KEYS_PROFILE}" STREQUAL "${VENDOR_KEYS_PROFILE}")
+    message(WARNING "VENDOR_KEYS_PROFILE env var is '$ENV{VENDOR_KEYS_PROFILE}' but the configured "
+                    "profile is '${VENDOR_KEYS_PROFILE}'. The env var only seeds a fresh configure; "
+                    "switch profiles with: idf.py -DVENDOR_KEYS_PROFILE=<profile> build")
 endif()
 message(STATUS "Seedsigner loader: vendor keys profile = ${VENDOR_KEYS_PROFILE}")
 

@@ -31,7 +31,7 @@ eFuse-secured Secure Boot V2
 | `main/bip39_wordlist.c` | 2048-word BIP-39 list (anti-phish vocab). |
 | `main/loader_config.h` | Shared limits: `MAX_FIRMWARE_SIZE`, `MAX_SEGMENT_COUNT`, `MAX_MMU_MAPPINGS`, `MAX_DIRECT_COPIES`. |
 | `main/ld/loader_high.ld` | Relocates the loader footprint to 0x4FF40000+, clear of the payload region (MEMORY redefinition, linked after esp_system). |
-| `keys/` | Vendor signing keys. `keys/test/` = dev keys, `keys/production/` = release keys. `VENDOR_KEYS_PROFILE` selects the build. |
+| `keys/` | Vendor signing keys. `keys/test/` = dev keys, `keys/production/` = release keys. The `VENDOR_KEYS_PROFILE` CMake cache var (default `test`) selects the build — switch with `idf.py -DVENDOR_KEYS_PROFILE=production build`. |
 | `components/specter_crypto/` | Specter secure-app-loader component: `bl_section` (bundle format), `bl_signature` (secp256k1 multisig), secp256k1 tree. |
 | `tools/` | `generate_vendor_key.py`, `generate_signed_payload.py`, `package_firmware.py`. |
 | `pytest_seedsigner_bootloader_p4_stateless_os.py` | Integration test, drives the full boot over serial (`test.sh`). |

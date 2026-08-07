@@ -15,7 +15,11 @@ The profile selects which keys file the build uses (default: test). Always
 build the loader with the SAME profile as the key you sign payloads with:
 
     python3 tools/generate_vendor_key.py --profile production
-    VENDOR_KEYS_PROFILE=production idf.py build
+    idf.py -DVENDOR_KEYS_PROFILE=production build
+
+Note: the profile is a CMake cache variable — pass it with -D (never a bare
+env var, which only seeds a fresh configure and silently keeps an existing
+profile).
 
 Use -f/--force to overwrite an existing key without prompting. Override the
 private key path with the VENDOR_SIGNING_KEY env var.
@@ -77,7 +81,7 @@ def main():
     print(f"Wrote {vendor_keys_c}")
 
     print("\nRemember to rebuild the loader so it embeds this pubkey:")
-    print(f"    VENDOR_KEYS_PROFILE={args.profile} idf.py build")
+    print(f"    idf.py -DVENDOR_KEYS_PROFILE={args.profile} build")
 
 
 if __name__ == "__main__":

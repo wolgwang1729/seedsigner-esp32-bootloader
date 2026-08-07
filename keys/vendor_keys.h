@@ -13,8 +13,8 @@
 #define SIG_THRESHOLD 1
 
 // Vendor keys — the only keys authorized to sign the payload. Selected at build
-// time via the VENDOR_KEYS_PROFILE environment variable (see main/CMakeLists.txt):
-//   VENDOR_KEYS_PROFILE=test       -> keys/test/vendor_keys.c   (default)
-//   VENDOR_KEYS_PROFILE=production -> keys/production/vendor_keys.c
+// time via the VENDOR_KEYS_PROFILE CMake cache variable (see main/CMakeLists.txt):
+//   idf.py build                                     -> keys/test/vendor_keys.c       (default)
+//   idf.py -DVENDOR_KEYS_PROFILE=production build    -> keys/production/vendor_keys.c
 extern const bl_pubkey_t vendor_keys[];
 extern const bl_pubkey_t *pubkeys_boot[];

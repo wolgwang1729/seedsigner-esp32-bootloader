@@ -51,14 +51,21 @@ This generates `payload_signing_key.pem` (gitignored) and writes the matching
 the SD payload against this public key, so the two must match or the firmware
 won't boot.
 
-The key profile selects which keys file the build compiles:
+The key profile is a CMake cache variable that selects which keys file the
+build compiles:
 
 ```bash
 # test is the default profile (dev only)
 idf.py build
 # production keys (hold the private key offline!)
-VENDOR_KEYS_PROFILE=production idf.py build
+idf.py -DVENDOR_KEYS_PROFILE=production build
 ```
+
+Pass `-D` to switch profiles — it rewrites `CMakeCache.txt` (a configure
+dependency), so the change always takes effect. Do NOT rely on the
+`VENDOR_KEYS_PROFILE` env var to switch: it is only read at configure time and
+never retriggers a reconfigure, so it would silently keep the previously
+configured profile. A divergent env var is called out as a build warning.
 
 If you regenerate the key, `keys/<profile>/vendor_keys.c` is rewritten
 automatically — just rebuild the loader. `tools/generate_signed_payload.py`

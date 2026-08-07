@@ -44,7 +44,9 @@ def build_section(name, version, payload, attributes=b''):
 # Vendor signing key (private, gitignored — payload_signing_key.pem). Override
 # the path with the VENDOR_SIGNING_KEY env var if the key lives elsewhere.
 # The compiled loader key must match (keys/<profile>/vendor_keys.c, selected by
-# VENDOR_KEYS_PROFILE at build time). Use the same profile here as at build:
+# -DVENDOR_KEYS_PROFILE at build time). This tool's own profile read below is
+# just for the sanity check; the loader build uses the CMake cache variable:
+#   idf.py -DVENDOR_KEYS_PROFILE=test build
 #   VENDOR_KEYS_PROFILE=test python3 tools/generate_signed_payload.py in.bin out.bin
 KEY_PATH = os.environ.get(
     "VENDOR_SIGNING_KEY",

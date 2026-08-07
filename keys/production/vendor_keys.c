@@ -6,7 +6,7 @@
 // corresponding private key is held offline and is NEVER committed.
 //
 // Regenerate with:
-//   VENDOR_KEYS_PROFILE=production python3 tools/generate_vendor_key.py
+//   python3 tools/generate_vendor_key.py --profile production
 #include "vendor_keys.h"
 
 const bl_pubkey_t vendor_keys[] = {
