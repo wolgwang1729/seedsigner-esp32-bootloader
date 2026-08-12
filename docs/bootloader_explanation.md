@@ -118,6 +118,8 @@ needs to overwrite with the payload.
 This overlap causes four distinct problems, each addressed by a specific piece
 of the codebase:
 
+![Memory Overlap](../assets/memory_overlap.png)
+
 ### 3.1 The cache-eviction buffer overwrites the payload
 
 To hand off cleanly, the loader must drain its L1 data cache. It does this by
@@ -228,6 +230,8 @@ and the loader would report the file "not found" despite a successful mount.
 The SD file is not a raw binary. It uses the Specter bundle format: a "main"
 section (256-byte `bl_section_t` header + the raw ESP32 image) followed by a
 "sign" section. The loader validates the bundle in this order:
+
+![Specter Bundle Format](../assets/specter_bundle.png)
 
 1. **Header validation**: Checks the Specter magic number and structural
    integrity via `blsect_validate_header()`.
@@ -529,6 +533,8 @@ random_fill   data  0x06     0x132000   0x6CE000
 ---
 
 ## 10. Complete boot chain
+
+![Secure Boot Chain Flow](../assets/boot_chain_flow.png)
 
 ```
 eFuse root of trust (Secure Boot V2, RSA)
