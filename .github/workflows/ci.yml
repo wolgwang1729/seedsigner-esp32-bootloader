@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    name: Build Payload & Bootloader
+    # Using standard ubuntu-latest so we have access to Docker for both builds
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Bootloader
+        uses: actions/checkout@v4
+        with:
+          path: bootloader
+
+      - name: Checkout MicroPython Builder
+        uses: actions/checkout@v4
+        with:
+          repository: wolgwang1729/seedsigner-micropython-builder
+          path: micropython-builder
+          submodules: recursive
+
+      - name: Build MicroPython Payload
+        run: |
+          cd micropython-builder
+          # Initialize submodules for frozen app
+          git submodule update --init deps/seedsigner deps/embit
+          export SS_APP_DIR=$PWD/deps/seedsigner
+          export SS_EMBIT_DIR=$PWD/deps/embit
+          # The makefile uses docker internally
+          make docker-build-all BOARD=WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43
+
+      - name: Generate Keys, Sign Payload & Build Bootloader
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace/bootloader espressif/idf:v5.5.1 bash -c "
+            . \$IDF_PATH/export.sh &&
+            pip install ecdsa bech32 pytest pytest-embedded pytest-embedded-idf pytest-embedded-serial &&
+            
+            echo 'Generating Keys...' &&
+            espsecure.py generate_signing_key secure_boot_signing_key.pem &&
+            python3 tools/generate_vendor_key.py --profile test &&
+            
+            echo 'Signing Payload...' &&
+            python3 tools/generate_signed_payload.py \
+              ../micropython-builder/build/WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43/micropython.bin \
+              seedsigner_esp32p4.bin &&
+            
+            echo 'Building Bootloader...' &&
+            idf.py build
+          "
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: complete-build-artifacts
+          path: |
+            bootloader/build/bootloader/bootloader.bin
+            bootloader/build/partition_table/partition-table.bin
+            bootloader/build/seedsigner_secure_loader.bin
+            bootloader/seedsigner_esp32p4.bin
+
+      - name: Run Hardware Tests (pytest)
+        continue-on-error: true
+        run: |
+          # Pytest requires a physical ESP32-P4 and the SD card payload.
+          # We map /dev/ttyACM0 to the container if it exists.
+          docker run --rm --device=/dev/ttyACM0 -v ${{ github.workspace }}:/workspace -w /workspace/bootloader espressif/idf:v5.5.1 bash -c "
+            . \$IDF_PATH/export.sh &&
+            pip install pytest pytest-embedded pytest-embedded-idf pytest-embedded-serial &&
+            pytest -s --embedded-services esp,idf --target esp32p4 pytest_seedsigner_bootloader_p4_stateless_os.py
+          " || echo "Hardware tests skipped or failed due to missing ESP32-P4 device / SD card."
