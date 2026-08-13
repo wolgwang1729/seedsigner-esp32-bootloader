@@ -19,6 +19,10 @@ Two independent key pairs protect this chain:
 
 Both private keys are gitignored and must be generated locally, never commit them.
 
+## Demo
+
+<video src="https://github.com/user-attachments/assets/c80e6a40-e6c3-45e0-b2f2-39b7ead0d9e8" controls width="100%"></video>
+
 ## Prerequisites
 
 - ESP-IDF v5.5 (`export.sh` sourced, or set `IDF_PATH`)
