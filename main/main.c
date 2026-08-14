@@ -108,6 +108,18 @@ void app_main(void)
             while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
 
+        // Bounds-check the declared payload size against the bundle we actually
+        // loaded. blsect_validate_header only enforces the Specter 16 MB cap,
+        // not the loaded file size — a forged pl_size would hash and then
+        // dereference out of bounds.
+        if (sizeof(bl_section_t) + main_hdr->pl_size > fw_size) {
+            ESP_LOGE(TAG, "Payload size out of bounds (%lu + %lu > %lu loaded). Halting.",
+                     (unsigned long)sizeof(bl_section_t), (unsigned long)main_hdr->pl_size,
+                     (unsigned long)fw_size);
+            memset(psram_buf, 0, fw_size);
+            while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
+
         // Hash the whole main section (header + payload) from PSRAM.
         // blsys_flash_read maps bl_addr_t to a direct pointer.
         bl_hash_t hash_obj;
@@ -123,6 +135,13 @@ void app_main(void)
         bl_section_t *sig_hdr = (bl_section_t *)(psram_buf + sizeof(bl_section_t) +
                                                  main_hdr->pl_size);
         if (sig_hdr->magic == BL_SECT_MAGIC && blsect_is_signature(sig_hdr)) {
+            // Bounds-check the signature section (header + sig payload) too.
+            const uint8_t *bundle_end = psram_buf + fw_size;
+            if ((uint8_t *)(sig_hdr + 1) + sig_hdr->pl_size > bundle_end) {
+                ESP_LOGE(TAG, "Signature section out of bounds. Halting.");
+                memset(psram_buf, 0, fw_size);
+                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
             uint8_t sig_msg[BL_SIG_MSG_MAX];
             size_t sig_msg_size = sizeof(sig_msg);
             if (blsect_make_signature_message(sig_msg, &sig_msg_size, &hash_obj, 1)) {

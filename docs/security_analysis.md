@@ -368,15 +368,9 @@ not code logic.
 
 ## 6. What needs to happen before production
 
-The findings split into three categories. This section is the canonical action
+The findings split into two categories. This section is the canonical action
 list - each item is argued in the section it references, and the references keep
 the analysis from repeating itself.
-
-### Code fixes (can be done now)
-
-**The `pl_size` bounds check (A8).** Add `sizeof(bl_section_t) + main_hdr->pl_size
-<= fw_size` before dereferencing `sig_hdr` in `main.c`. One line. Independent of
-everything else.
 
 ### Process changes (no hardware, just discipline)
 
