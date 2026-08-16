@@ -1,0 +1,19 @@
+CONFIG_IDF_TARGET="esp32s3"
+
+# Custom partition table for ESP32-S3
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_esp32s3.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x10000
+
+# 16KB I-cache — MUST match the payload's instruction cache size.
+CONFIG_ESP32S3_INSTRUCTION_CACHE_SIZE=0x4000
+
+# Pin internal static DRAM so heap starts above JMP zone footprint (0x3FCC8000)
+CONFIG_ESP32S3_USE_FIXED_STATIC_RAM_SIZE=y
+CONFIG_ESP32S3_FIXED_STATIC_RAM_SIZE=0x40000
+
+# Octal PSRAM at 40MHz for DevKit N8R8 MSPI stability
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_40M=y
+
+# Disable memprot feature so high-IRAM JMP zone is accessible
+#CONFIG_ESP_SYSTEM_MEMPROT_FEATURE is not set

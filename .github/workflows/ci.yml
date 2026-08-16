@@ -8,9 +8,21 @@ on:
 
 jobs:
   build-and-test:
-    name: Build Payload & Bootloader
+    name: Build Payload & Bootloader (${{ matrix.target }})
     # Using standard ubuntu-latest so we have access to Docker for both builds
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: esp32p4
+            board: WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43
+            platform: seedsigner_esp32p4
+            test_script: pytest_seedsigner_bootloader_p4_stateless_os.py
+          - target: esp32s3
+            board: WAVESHARE_ESP32_S3_TOUCH_LCD_35B
+            platform: seedsigner_esp32s3
+            test_script: pytest_seedsigner_bootloader_esp32s3_stateless_os.py
 
     steps:
       - name: Checkout Bootloader
@@ -22,10 +34,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: wolgwang1729/seedsigner-micropython-builder
+          ref: esp32s3-stateless-boot
           path: micropython-builder
           submodules: recursive
 
-      - name: Build MicroPython Payload
+      - name: Build MicroPython Payload (${{ matrix.target }})
         run: |
           cd micropython-builder
           # Initialize submodules for frozen app
@@ -33,9 +46,9 @@ jobs:
           export SS_APP_DIR=$PWD/deps/seedsigner
           export SS_EMBIT_DIR=$PWD/deps/embit
           # The makefile uses docker internally
-          make docker-build-all BOARD=WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43
+          make docker-build-all BOARD=${{ matrix.board }}
 
-      - name: Generate Keys, Sign Payload & Build Bootloader
+      - name: Generate Keys, Sign Payload & Build Bootloader (${{ matrix.target }})
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace/bootloader espressif/idf:v5.5.1 bash -c "
             . \$IDF_PATH/export.sh &&
@@ -47,30 +60,32 @@ jobs:
             
             echo 'Signing Payload...' &&
             python3 tools/generate_signed_payload.py \
-              ../micropython-builder/build/WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43/micropython.bin \
-              seedsigner_esp32p4.bin &&
+              ../micropython-builder/build/${{ matrix.board }}/micropython.bin \
+              ${{ matrix.platform }}.bin \
+              --platform ${{ matrix.platform }} &&
             
-            echo 'Building Bootloader...' &&
+            echo 'Building Bootloader for ${{ matrix.target }}...' &&
+            idf.py set-target ${{ matrix.target }} &&
             idf.py build
           "
 
-      - name: Upload Artifacts
+      - name: Upload Artifacts (${{ matrix.target }})
         uses: actions/upload-artifact@v4
         with:
-          name: complete-build-artifacts
+          name: complete-build-artifacts-${{ matrix.target }}
           path: |
             bootloader/build/bootloader/bootloader.bin
             bootloader/build/partition_table/partition-table.bin
             bootloader/build/seedsigner_secure_loader.bin
-            bootloader/seedsigner_esp32p4.bin
+            bootloader/${{ matrix.platform }}.bin
 
-      - name: Run Hardware Tests (pytest)
+      - name: Run Hardware Tests (${{ matrix.target }})
         continue-on-error: true
         run: |
-          # Pytest requires a physical ESP32-P4 and the SD card payload.
+          # Pytest requires a physical ESP32 device and the SD card payload.
           # We map /dev/ttyACM0 to the container if it exists.
           docker run --rm --device=/dev/ttyACM0 -v ${{ github.workspace }}:/workspace -w /workspace/bootloader espressif/idf:v5.5.1 bash -c "
             . \$IDF_PATH/export.sh &&
             pip install pytest pytest-embedded pytest-embedded-idf pytest-embedded-serial &&
-            pytest -s --embedded-services esp,idf --target esp32p4 pytest_seedsigner_bootloader_p4_stateless_os.py
-          " || echo "Hardware tests skipped or failed due to missing ESP32-P4 device / SD card."
+            pytest -s --embedded-services esp,idf --target ${{ matrix.target }} ${{ matrix.test_script }}
+          " || echo "Hardware tests skipped or failed due to missing ${{ matrix.target }} device / SD card."

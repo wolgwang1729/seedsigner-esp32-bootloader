@@ -1,7 +1,5 @@
-// JMP zone: the cache-off point of no return that programs the MMU, copies the
-// direct-to-SRAM segments, and jumps into the payload. Everything here must be
-// RTC_IRAM (ROM-safe, cache-independent) or RTC_DATA, and must run on the
-// dedicated jump_stack (see below).
+// JMP zone for ESP32-P4: RISC-V naked trampoline and cache eviction.
+// Relocated above payload region by loader_high.ld.
 #include <stdint.h>
 
 #include "freertos/FreeRTOS.h"
@@ -22,8 +20,7 @@
 #include "loader_config.h"
 #include "jump.h"
 
-// RTC RAM survives a software reset (not a power cycle). Populated by app_main
-// (Step 7) in normal cache context, consumed here with the cache off.
+// RTC RAM survives a software reset (not a power cycle).
 RTC_DATA_ATTR pending_copy_t safe_copies[MAX_DIRECT_COPIES];
 RTC_DATA_ATTR int            safe_copy_count    = 0;
 RTC_DATA_ATTR uint32_t       safe_entry_addr    = 0;
@@ -31,19 +28,10 @@ RTC_DATA_ATTR mmu_mapping_t  safe_mappings[MAX_MMU_MAPPINGS];
 RTC_DATA_ATTR int            safe_mapping_count = 0;
 
 // Scratch buffer used to thrash the L1 D-cache before the jump. Relocated above
-// the payload region (0x4FF40000+) by loader_high.ld, so it can also be written
-// after the payload copies without clobbering the copied image. Sized at 4x the
-// L1 D-cache capacity so a single distinct-address pass evicts every set/way.
+// the payload region (0x4FF40000+) by loader_high.ld.
 static uint32_t evict_buf[262144 / 4];
 
-// Dedicated stack for the JMP zone and the payload's early boot. The default
-// main-task stack is carved from the low RETENT_RAM heap (0x4ff00000-0x4ff3afc0)
-// and lands at ~0x4ff04590 — INSIDE the payload's internal-SRAM .text region
-// (0x4ff00000-0x4ff0e942). Its frames would clobber the freshly copied image:
-// do_mmu_mapping_and_jump()'s stack-local JMP strings overwrite the payload's
-// rtc_clk_cpu_freq_get_config@0x4ff0462c before the JMP[8] drain bakes them into
-// SRAM, and the payload inherits that SP too. jump_stack lives in the relocated
-// loader region (0x4FF40000+, loader_high.ld), clear of the payload area.
+// Dedicated stack for the JMP zone and the payload's early boot.
 static uint8_t jump_stack[32768] __attribute__((aligned(16)));
 
 // ---------------------------------------------------------------------------
@@ -58,8 +46,6 @@ static void RTC_IRAM_ATTR bootloader_uart0_print(const char *str)
 
     while (*str) {
         char ch = *str++;
-
-        // Hardware UART0
         uint32_t status = *uart0_status;
         if (status == 0xFFFFFFFF) {
             *uart0_fifo = (uint32_t)ch;
@@ -87,37 +73,6 @@ static void RTC_IRAM_ATTR dbg_print_hex(uint32_t val)
 // ---------------------------------------------------------------------------
 // do_mmu_mapping_and_jump — point of no return
 // ---------------------------------------------------------------------------
-// Naked trampoline: the JMP zone (and the payload's inherited SP) must run on
-// jump_stack, not on the main-task stack that overlaps the payload's SRAM .text.
-// The RISC-V HW stack guard (assist_debug core0) is monitoring the main task's
-// original heap-stack bounds (~0x4ff00934-0x4ff04b30) and faults the moment SP
-// leaves them, so before switching SP we (1) mask interrupts — otherwise a tick
-// context-switch re-arms the monitor with the next task's bounds — and
-// (2) neutralize the guard: widen SP_MIN/SP_MAX to full range and clear the
-// SP-spill ENA bits (ASSIST_DEBUG_CORE_0_INTR_ENA_REG @ 0x3FF06000).
-void __attribute__((naked)) do_mmu_mapping_and_jump_trampoline(void)
-{
-    asm volatile (
-        "csrw mie, zero\n"
-        "li   t0, 0x3ff06000\n"
-        "li   t2, -1\n"
-        "sw   t2, 0x3c(t0)\n"    /* SP_MAX_REG  = 0xFFFFFFFF */
-        "sw   zero, 0x38(t0)\n"  /* SP_MIN_REG  = 0          */
-        "sw   zero, 0x0c(t0)\n"  /* INTR_CLR_REG: clear any latched spill */
-        "lw   t3, 0(t0)\n"
-        "li   t1, 0x300\n"
-        "not  t1, t1\n"
-        "and  t3, t3, t1\n"
-        "sw   t3, 0(t0)\n"       /* clear SP_SPILL_MIN/MAX_ENA */
-        "mv   sp, %0\n"
-        "call do_mmu_mapping_and_jump\n"
-        :
-        : "r"(jump_stack + sizeof(jump_stack))
-    );
-}
-
-// Note: not static — the naked trampoline calls this only from inline asm, so
-// the compiler sees no C-level reference and would flag/drop a static symbol.
 void RTC_IRAM_ATTR __attribute__((noreturn)) do_mmu_mapping_and_jump(void)
 {
     char msg5[]   = "JMP[7] JUMP!\r\n";
@@ -248,66 +203,56 @@ void RTC_IRAM_ATTR __attribute__((noreturn)) do_mmu_mapping_and_jump(void)
             char m_ok[] = " OK\r\n";
             bootloader_uart0_print(m_ok);
 
-            vaddr   += page_size;
+            vaddr += page_size;
             mmu_val++;
         }
     }
 
-    // Invalidate caches for remapped region
-    extern int Cache_Invalidate_Addr(uint32_t map, uint32_t addr, uint32_t size);
-    if (safe_mapping_count == 0) {
-        Cache_Invalidate_Addr(0x03, 0x48000000, 0x40000);
-        Cache_Invalidate_Addr(0x10, 0x48000000, 0x40000);
-        Cache_Invalidate_Addr(0x20, 0x48000000, 0x40000);
-    } else {
-        for (int i = 0; i < safe_mapping_count; i++) {
-            Cache_Invalidate_Addr(0x03, safe_mappings[i].vaddr, safe_mappings[i].len);
-            Cache_Invalidate_Addr(0x10, safe_mappings[i].vaddr, safe_mappings[i].len);
-            Cache_Invalidate_Addr(0x20, safe_mappings[i].vaddr, safe_mappings[i].len);
-        }
+    // Invalidate caches through ROM API
+    extern void Cache_Invalidate_Addr(uint32_t map, uint32_t vaddr, uint32_t size);
+    for (int i = 0; i < safe_mapping_count; i++) {
+        Cache_Invalidate_Addr(0x10, safe_mappings[i].vaddr, safe_mappings[i].len);
+        Cache_Invalidate_Addr(0x20, safe_mappings[i].vaddr, safe_mappings[i].len);
     }
-    asm volatile ("fence.i\n");
+    asm volatile ("fence.i\n" "fence rw,rw\n");
+
+    // Second D-cache drain pass
+    for (int i = 0; i < (65536 / 4); i++) evict_ptr[i] = i;
+
+    // Zero out mtvec so early traps in the payload don't vector to loader ISRs
+    asm volatile ("csrw mtvec, zero\n");
 
     bootloader_uart0_print(msg5);
 
-    // Drain UART TX FIFO before jumping
-    esp_rom_output_tx_wait_idle(0);
-    volatile uint32_t *uart_status = (volatile uint32_t *)0x500CA01C;
-    volatile uint32_t drain_timeout = 1000000;
-    while (((*uart_status >> 16) & 0xFF) > 0 && --drain_timeout > 0) {}
-
-    // The direct-to-SRAM segments were copied into L2MEM (0x4ff0xxxx) through
-    // the write-back L1 D-cache, so the payload bytes are still dirty in cache,
-    // not yet in SRAM. The payload entry line is never I-fetched by the loader
-    // anymore (the loader's own segments were relocated to 0x4FF40000+, clear
-    // of the payload region), so a plain D-cache eviction suffices: writing the
-    // relocated evict_buf (>= 4x the L1 D-cache, all distinct lines) forces
-    // every set/way, including the freshly written MRU payload lines, to be
-    // written back to SRAM. The ROM's L1 cache ops cannot do this — they hang
-    // for internal-SRAM ranges because the L2 sync engine only covers external
-    // memory (see Debugging_Notes.md).
-    volatile uint32_t *drain_ptr = evict_buf;
-    for (int i = 0; i < (262144 / 4); i++) drain_ptr[i] = i;
-    char m_ev[] = "JMP[8] D-cache drained post-copy\r\n";
-    bootloader_uart0_print(m_ev);
-
-    // Final interrupt disable + CSR/PMP teardown
-    asm volatile ("csrw mie, zero\n");
-    rv_utils_intr_global_disable();
-    asm volatile (
-        "csrw mtvec, zero\n"
-        "csrw 0x3a0, zero\n" "csrw 0x3a1, zero\n"
-        "csrw 0x3a2, zero\n" "csrw 0x3a3, zero\n"
-        "csrw 0x3b0, zero\n" "csrw 0x3b1, zero\n"
-        "csrw 0x3b2, zero\n" "csrw 0x3b3, zero\n"
-        "csrw 0x3b4, zero\n" "csrw 0x3b5, zero\n"
-        "csrw 0x3b6, zero\n" "csrw 0x3b7, zero\n"
-        "csrw 0x3b8, zero\n" "csrw 0x3b9, zero\n"
-        "csrw 0x3ba, zero\n" "csrw 0x3bb, zero\n"
-        "csrw 0x3bc, zero\n" "csrw 0x3bd, zero\n"
-        "csrw 0x3be, zero\n" "csrw 0x3bf, zero\n"
-    );
+    // Drain UART0 FIFO before jumping
+    volatile uint32_t *uart0_status = (volatile uint32_t *)0x500CA01C;
+    volatile uint32_t drain_timeout = 100000;
+    while (((*uart0_status >> 16) & 0xFF) > 0 && --drain_timeout > 0) {}
 
     typedef void (*entry_t)(void) __attribute__((noreturn));
-    ((entry_t)safe_entry_addr)();
+    entry_t target_entry = (entry_t)safe_entry_addr;
+    target_entry();
+
+    while (1);
+}
+
+void __attribute__((naked)) do_mmu_mapping_and_jump_trampoline(void)
+{
+    asm volatile (
+        "csrw mie, zero\n"
+        "li   t0, 0x3ff06000\n"
+        "li   t2, -1\n"
+        "sw   t2, 0x3c(t0)\n"    /* SP_MAX_REG  = 0xFFFFFFFF */
+        "sw   zero, 0x38(t0)\n"  /* SP_MIN_REG  = 0          */
+        "sw   zero, 0x0c(t0)\n"  /* INTR_CLR_REG: clear any latched spill */
+        "lw   t3, 0(t0)\n"
+        "li   t1, 0x300\n"
+        "not  t1, t1\n"
+        "and  t3, t3, t1\n"
+        "sw   t3, 0(t0)\n"       /* clear SP_SPILL_MIN/MAX_ENA */
+        "mv   sp, %0\n"
+        "call do_mmu_mapping_and_jump\n"
+        :
+        : "r"(jump_stack + sizeof(jump_stack))
+    );
 }

@@ -1,4 +1,4 @@
-// SD-card storage: mount the SDMMC interface and read the firmware bundle.
+// SD-card storage for ESP32-P4: mount native 4-bit SDMMC interface with on-chip LDO.
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -102,9 +102,8 @@ uint8_t *load_firmware_from_sd(size_t *out_size)
 
     ESP_LOGI(TAG, "Unmounting SD card before verification (TOCTOU-safe)...");
     esp_vfs_fat_sdcard_unmount(MOUNT_POINT, card);
-    ESP_LOGI(TAG, "[SD CARD] Loaded %lu bytes from %s", (unsigned long)st.st_size,
-             SD_FIRMWARE_PATH);
 
-    if (out_size) *out_size = st.st_size;
+    *out_size = st.st_size;
+    ESP_LOGI(TAG, "Loaded %lu bytes from %s", (unsigned long)*out_size, SD_FIRMWARE_PATH);
     return psram_buf;
 }

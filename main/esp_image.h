@@ -48,8 +48,8 @@ typedef struct {
 
 // Validate the raw ESP32 image and build the load plan (app_main steps 3-6).
 // Walks the segment table once to measure the PSRAM MMU footprint, stages
-// MMU-mapped segments (0x48000000-0x4C000000) into a fresh aligned fake_flash
-// buffer, and records direct-to-SRAM segments as deferred copies.
+// MMU-mapped segments into a fresh aligned fake_flash buffer, and records
+// direct-to-SRAM segments as deferred copies.
 //
 // Fatal errors halt inside (the bootloader fails closed by design). On success
 // the caller must NOT free psram_buf — direct copies still point into it.

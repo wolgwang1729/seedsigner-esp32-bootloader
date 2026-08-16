@@ -1,57 +1,29 @@
-CONFIG_IDF_TARGET="esp32p4"
-CONFIG_PARTITION_TABLE_OFFSET=0x20000
-CONFIG_BOOTLOADER_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_BOOTLOADER_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 CONFIG_FREERTOS_UNICORE=y
 CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE=y
 
-# Secure Boot V2 — the 2nd-stage bootloader verifies the app loader
-# (seedsigner_secure_loader.bin) against the eFuse-stored key digest on every
-# boot, so a malicious or wrong loader image in flash is rejected before it can
-# run. The loader itself then verifies the SD-card payload via secp256k1
-# multisig.
+# Secure Boot V2 (RSA-3072)
 CONFIG_SECURE_BOOT=y
 CONFIG_SECURE_BOOT_V2_ENABLED=y
+CONFIG_SECURE_BOOT_SUPPORTS_RSA=y
 CONFIG_SECURE_SIGNED_ON_BOOT=y
 CONFIG_SECURE_BOOT_SIGNING_KEY="secure_boot_signing_key.pem"
-# The signing key is dev-only and gitignored. Generate your own before building:
-#   espsecure.py generate_signing_key secure_boot_signing_key.pem
 CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
 
-# FatFs: long filename support — the payload bundle is seedsigner_esp32p4.bin
-# (22 chars, > 8.3). The FatFs default (LFN_NONE) matches short names only, so
-# the SD read would fail with "Firmware file ... not found" despite a good mount.
+# FatFs: long filename support for payload names (> 8.3 chars).
 CONFIG_FATFS_LFN_HEAP=y
 
-# ESP32-P4 specific chip revision (v1.3 board support)
-CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
-
 # eFuses: simulate all reads/writes in RAM — no physical eFuse is ever burned.
-# Safe dev mode for experimenting with secure-boot/flash-encryption provisioning
-# on real silicon.
-# KEEP_IN_FLASH persists the virtual state across reboots in the 'efuse' data
-# partition.
+# KEEP_IN_FLASH persists the virtual state across reboots in the 'efuse' partition.
 CONFIG_EFUSE_VIRTUAL=y
 CONFIG_EFUSE_VIRTUAL_KEEP_IN_FLASH=y
 CONFIG_EFUSE_VIRTUAL_LOG_ALL_WRITES=y
 
-# PSRAM support (ESP32-P4 dev board has 32MB PSRAM). P4 uses the dedicated HEX
-# SPI-PSRAM interface (there is no CONFIG_SPIRAM_MODE_OCT on this target), and
-# instruction/rodata live in PSRAM automatically via the unified cache + MMU —
-# no extra SPIRAM_FETCH_INSTRUCTIONS/RODATA toggles needed (those are S3-only).
+# PSRAM support enabled
 CONFIG_SPIRAM=y
-CONFIG_SPIRAM_SPEED_80M=y
 
-# ESP32-P4: both of these default to 'y' but must stay OFF for this loader.
-# ESP_SYSTEM_PMP_IDRAM_SPLIT enables IRAM/DRAM split protection via PMP; the
-# loader relocates/overwrites IRAM at 0x4FF00000 and faults during early boot
-# (LP_WDT reset at 'cpu_start') when protection is active.
-# ESP_ENABLE_PVT auto-tunes HP/LP voltage via the PVT function; disabled for
-# debug stability (dev-only, matches the working build).
-CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n
-CONFIG_ESP_ENABLE_PVT=n
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y

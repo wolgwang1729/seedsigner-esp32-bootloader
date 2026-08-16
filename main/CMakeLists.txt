@@ -4,11 +4,6 @@
 # The profile is a CMake CACHE variable, set with -D so that switching it
 # always forces a reconfiguration (CMakeCache.txt is a configure dependency):
 #   idf.py -DVENDOR_KEYS_PROFILE=production build
-# A bare env var (VENDOR_KEYS_PROFILE=production idf.py build) is read only
-# at configure time and NEVER retriggers a reconfigure, so it would silently
-# keep the previously configured profile — the loader would ship the wrong
-# keys. The env var is therefore only used to seed the cache on a fresh
-# configure, and any later divergence is called out as a warning below.
 if(DEFINED ENV{VENDOR_KEYS_PROFILE} AND NOT DEFINED VENDOR_KEYS_PROFILE)
     set(VENDOR_KEYS_PROFILE "$ENV{VENDOR_KEYS_PROFILE}")
 endif()
@@ -26,22 +21,30 @@ message(STATUS "Seedsigner loader: vendor keys profile = ${VENDOR_KEYS_PROFILE}"
 
 set(KEYS_DIR "${CMAKE_CURRENT_LIST_DIR}/../keys")
 
+# Detect current build target
+idf_build_get_property(target IDF_TARGET)
+
+set(TARGET_SRCS "")
+set(EXTRA_REQUIRES "")
+
+if(target STREQUAL "esp32p4")
+    list(APPEND TARGET_SRCS "targets/esp32p4/storage_p4.c" "targets/esp32p4/jump_p4.c")
+    set(TARGET_LD "${CMAKE_CURRENT_LIST_DIR}/targets/esp32p4/loader_high.ld")
+elseif(target STREQUAL "esp32s3")
+    list(APPEND TARGET_SRCS "targets/esp32s3/storage_s3.c" "targets/esp32s3/jump_s3.c")
+    list(APPEND EXTRA_REQUIRES "esp_driver_sdspi" "esp_driver_spi" "bootloader_support")
+    set(TARGET_LD "${CMAKE_CURRENT_LIST_DIR}/targets/esp32s3/loader_high.ld")
+else()
+    message(FATAL_ERROR "Unsupported IDF_TARGET '${target}'. Supported targets: esp32p4, esp32s3")
+endif()
+
 idf_component_register(
-    SRCS "main.c" "storage.c" "esp_image.c" "jump.c" "anti_phish.c" "bip39_wordlist.c" "${KEYS_DIR}/${VENDOR_KEYS_PROFILE}/vendor_keys.c"
-    PRIV_INCLUDE_DIRS "${KEYS_DIR}"
-    PRIV_REQUIRES esp_mm spi_flash esp_partition fatfs sdmmc specter_crypto
+    SRCS "main.c" "esp_image.c" "anti_phish.c" "bip39_wordlist.c"
+         ${TARGET_SRCS}
+         "${KEYS_DIR}/${VENDOR_KEYS_PROFILE}/vendor_keys.c"
+    PRIV_INCLUDE_DIRS "${KEYS_DIR}" "."
+    PRIV_REQUIRES esp_mm spi_flash esp_partition fatfs sdmmc specter_crypto ${EXTRA_REQUIRES}
 )
 
-# Relocate the loader's own segments off the payload's L2MEM region (0x4FF00000)
-# up to 0x4FF40000+, so the payload entry line is never I-fetched by the loader
-# and the D-cache drain buffer sits clear of the copied image. This script is a
-# MEMORY redefinition that must land after esp_system's memory.ld on the link
-# line — linked after esp_system, so it does.
-target_linker_script(${COMPONENT_LIB} INTERFACE "${CMAKE_CURRENT_LIST_DIR}/ld/loader_high.ld")
-
-# The payload is a Specter-signed firmware bundle read from the SD
-# card (/sdcard/seedsigner_esp32p4.bin). The loader verifies the secp256k1
-# multisig signature against the vendor keys (keys/<profile>/vendor_keys.c)
-# before parsing/executing the image. The SD card is unmounted immediately
-# after the read (TOCTOU-safe), then the loader executes the verified image
-# entirely from PSRAM.
+# Relocate the loader's own segments / JMP trampoline via target linker script
+target_linker_script(${COMPONENT_LIB} INTERFACE "${TARGET_LD}")

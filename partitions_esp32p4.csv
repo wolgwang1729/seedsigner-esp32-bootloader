@@ -1,0 +1,10 @@
+# ESP32-P4 Stateless Partition Table (8MB Flash)
+# Name,        Type,  Subtype,  Offset,    Size,    Flags
+# Bootloader is at 0x2000 (up to 128KB), ptable @ 0x20000 (Secure Boot V2 RSA-3072).
+nvs,           data,  0x99,     0x21000,   0x6000,
+phy_init,      data,  phy,      0x27000,   0x1000,
+efuse,         data,  0x05,     0x28000,   0x2000,
+# Factory app is 2MB (64KB-aligned at 0x30000 / 0x40000)
+factory,       app,   factory,  0x30000,   0x200000,
+# Pure SD stateless: random_fill spans all unallocated flash (5.8125 MB)
+random_fill,   data,  0x06,     0x230000,  0x5D0000,

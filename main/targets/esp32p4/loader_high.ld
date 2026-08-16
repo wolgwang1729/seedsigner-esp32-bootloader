@@ -1,5 +1,5 @@
 /*
- * Stateless loader relocation.
+ * Stateless loader relocation for ESP32-P4.
  *
  * The stock REV_LESS_V3 memory.ld.in layout places `sram_low` at 0x4FF00000,
  * so the loader's .text/.data/.bss occupy the same L2MEM lines the payload is
