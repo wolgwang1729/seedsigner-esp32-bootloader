@@ -42,6 +42,11 @@ static void crypto_progress_cb(void *ctx, bl_cbarg_t arg, uint32_t total, uint32
 // ---------------------------------------------------------------------------
 void app_main(void)
 {
+#if CONFIG_IDF_TARGET_ESP32S3
+    extern void esp_cpu_intr_disable(uint32_t mask);
+    esp_cpu_intr_disable(1 << 7); // ETS_CACHEERR_INUM on ESP32-S3
+#endif
+
     ESP_LOGI(TAG, "SeedSigner Stateless Loader — Target: %s", EXPECTED_PLATFORM);
 
     size_t fw_size = 0;

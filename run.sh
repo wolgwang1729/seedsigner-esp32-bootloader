@@ -138,15 +138,17 @@ if [[ "$ACTION" == "flash" || "$ACTION" == "all" ]]; then
         BL_OFFSET="0x0"
         PTABLE_OFFSET="0x10000"
         LOADER_OFFSET="0x20000"
+        FLASH_FREQ="80m"
     else
         BL_OFFSET="0x2000"
         PTABLE_OFFSET="0x20000"
         LOADER_OFFSET="0x30000"
+        FLASH_FREQ="40m"
     fi
 
     esptool.py --chip "$TARGET" --port "$PORT" --baud "$BAUD" \
         --before default_reset --after hard_reset write_flash \
-        --flash_mode dio --flash_freq 40m --flash_size 8MB \
+        --flash_mode keep --flash_freq keep --flash_size keep \
         "$BL_OFFSET" "$BOOTLOADER_BIN" \
         "$PTABLE_OFFSET" "$PARTITION_BIN" \
         "$LOADER_OFFSET" "$LOADER_BIN"

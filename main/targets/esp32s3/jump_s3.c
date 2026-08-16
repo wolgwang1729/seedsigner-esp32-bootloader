@@ -65,8 +65,8 @@ static void JMP_ZONE_TEXT bootloader_uart0_print(const char *str)
 
 static void JMP_ZONE_TEXT dbg_print_hex(uint32_t val)
 {
-    char hex[]    = "0x00000000";
-    char digits[] = "0123456789ABCDEF";
+    char hex[11] = {'0', 'x', '0', '0', '0', '0', '0', '0', '0', '0', '\0'};
+    const char digits[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
     for (int i = 9; i >= 2; i--) {
         hex[i] = digits[val & 0xF];
         val >>= 4;
