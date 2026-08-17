@@ -26,11 +26,11 @@ Both private keys are gitignored and must be generated locally, never commit the
 
 ### ESP32-P4
 
-<video src="https://github.com/user-attachments/assets/c80e6a40-e6c3-45e0-b2f2-39b7ead0d9e8" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/9826a537-8af3-4570-89bd-2bad9e608e5e" controls width="100%"></video>
 
 ### ESP32-S3
 
-<video src="https://github.com/user-attachments/assets/99f05199-7fac-498a-a753-a47c07af15bc" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/0011ab24-60c6-4ac4-83d1-0760f266ac68" controls width="100%"></video>
 
 ## Supported Targets
 
