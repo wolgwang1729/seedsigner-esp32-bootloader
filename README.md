@@ -37,7 +37,22 @@ Both private keys are gitignored and must be generated locally, never commit the
 | Target | Board | PSRAM | Secure Boot | Status |
 |---|---|---|---|---|
 | **ESP32-P4** | Waveshare ESP32-P4 WiFi6 Touch LCD 4.3 | 32MB | V2 (RSA-3072) | Working |
-| **ESP32-S3** | Waveshare ESP32-S3-Touch-LCD-3.5B (N8R8) | 8MB Octal | V2 (RSA-3072) | Working |
+| **ESP32-S3** | Waveshare ESP32-S3-Touch-LCD-3.5B (N8R8) / ESP32-S3-DEV-KIT-N8R8 | 8MB Octal | V2 (RSA-3072) | Working |
+
+### ESP32-S3 SD Card Wiring
+
+On ESP32-S3 modules with Octal PSRAM (`N8R8`), GPIOs 33–37 are reserved internally for the MSPI interface. The bootloader interfaces with an external MicroSD module (such as the standard HW-125 with level shifters or native SPI) over `SPI2_HOST` (SDSPI) with automatic SDMMC 1-bit fallback using the following pinout:
+
+| ESP32-S3 Pin | Signal (SDSPI) | Signal (SDMMC) | MicroSD Module (HW-125) |
+|---|---|---|---|
+| **`GND`** (Pin 1) | `GND` | `GND` | **Pin 1 (`GND`)** |
+| **`5V`** (Pin 2) | `VCC` (5V to LDO) | `VCC` | **Pin 2 (`VCC`)** |
+| **`GPIO 12`** (Pin 5) | `CS` (Chip Select) | `D2` | **Pin 6 (`CS`)** |
+| **`GPIO 11`** (Pin 6) | `SCK` (Clock) | `CLK` | **Pin 5 (`SCK`)** |
+| **`GPIO 10`** (Pin 7) | `MOSI` (Host → Card) | `CMD` | **Pin 4 (`MOSI`)** |
+| **`GPIO 9`** (Pin 8) | `MISO` (Card → Host) | `D0` | **Pin 3 (`MISO`)** |
+
+![ESP32-S3 SD Card Circuit Diagram](assets/circuit_diagram_esp32s3.jpg)
 
 ## Prerequisites
 
