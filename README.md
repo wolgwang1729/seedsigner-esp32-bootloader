@@ -1,14 +1,17 @@
 # seedsigner-esp32-bootloader
 
-Stateless secure bootloader for the SeedSigner ESP32-P4. Boot chain:
+Stateless secure bootloader for the SeedSigner ESP32 platform. Supports
+**ESP32-P4** and **ESP32-S3** targets from a single unified codebase.
 
-1. **Secure Boot V2** - the 2nd-stage bootloader verifies the loader image against the
-   eFuse-stored key digest on every boot.
-2. **Loader** (`seedsigner_secure_loader.bin`) - mounts the SD card, reads
-   `seedsigner_esp32p4.bin`, verifies its secp256k1 multisig signature against
-   `vendor_keys[]` (compiled in from `keys/<profile>/vendor_keys.c`), shows an
-   anti-phishing proof, then loads and jumps to the MicroPython firmware from
-   PSRAM.
+Boot chain:
+
+1. **Secure Boot V2** — the 2nd-stage bootloader verifies the loader image
+   against the eFuse-stored key digest on every boot.
+2. **Loader** (`seedsigner_secure_loader.bin`) — mounts the SD card, reads
+   `seedsigner_esp32p4.bin` or `seedsigner_esp32s3.bin`, verifies its
+   secp256k1 multisig signature against `vendor_keys[]` (compiled in from
+   `keys/<profile>/vendor_keys.c`), shows an anti-phishing proof, then loads
+   and jumps to the MicroPython firmware from PSRAM.
 
 Two independent key pairs protect this chain:
 
@@ -19,9 +22,22 @@ Two independent key pairs protect this chain:
 
 Both private keys are gitignored and must be generated locally, never commit them.
 
-## Demo
+## Demos
+
+### ESP32-P4
 
 <video src="https://github.com/user-attachments/assets/c80e6a40-e6c3-45e0-b2f2-39b7ead0d9e8" controls width="100%"></video>
+
+### ESP32-S3
+
+<video src="https://github.com/user-attachments/assets/99f05199-7fac-498a-a753-a47c07af15bc" controls width="100%"></video>
+
+## Supported Targets
+
+| Target | Board | PSRAM | Secure Boot | Status |
+|---|---|---|---|---|
+| **ESP32-P4** | Waveshare ESP32-P4 WiFi6 Touch LCD 4.3 | 32MB | V2 (RSA-3072) | Working |
+| **ESP32-S3** | Waveshare ESP32-S3-Touch-LCD-3.5B (N8R8) | 8MB Octal | V2 (RSA-3072) | Working |
 
 ## Prerequisites
 
@@ -33,6 +49,10 @@ Both private keys are gitignored and must be generated locally, never commit the
 ## Layer 1: Secure-boot signing key (RSA)
 
 ```bash
+# ESP32-S3 requires RSA-3072 for Secure Boot V2:
+espsecure.py generate_signing_key --version 2 --scheme rsa3072 secure_boot_signing_key.pem
+
+# ESP32-P4 (default RSA-3072):
 espsecure.py generate_signing_key secure_boot_signing_key.pem
 ```
 
@@ -79,30 +99,44 @@ warns if the payload signing key doesn't match the compiled keys file.
 
 Use the fork: https://github.com/wolgwang1729/seedsigner-micropython-builder
 
+The ESP32-S3 stateless shim lives on the `esp32s3-stateless-boot` branch.
+
 ```bash
 git clone https://github.com/wolgwang1729/seedsigner-micropython-builder
 cd seedsigner-micropython-builder
+
+# For ESP32-P4 (main branch):
 make docker-build-all BOARD=WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43
+
+# For ESP32-S3 (esp32s3-stateless-boot branch):
+git checkout esp32s3-stateless-boot
+make docker-build-all BOARD=WAVESHARE_ESP32_S3_TOUCH_LCD_35B
 ```
 
-The raw firmware lands at
-`build/WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_43/micropython.bin`.
+The raw firmware lands at `build/<BOARD>/micropython.bin`.
 
 ## Signing the payload bundle
 
 ```bash
-python3 tools/generate_signed_payload.py \
-    <micropython.bin> \
-    seedsigner_esp32p4.bin
+# For ESP32-P4 (default):
+python3 tools/generate_signed_payload.py <micropython.bin> seedsigner_esp32p4.bin
+
+# For ESP32-S3:
+python3 tools/generate_signed_payload.py --platform seedsigner_esp32s3 \
+    <micropython.bin> seedsigner_esp32s3.bin
 ```
 
-Copy `seedsigner_esp32p4.bin` to the **root of a FAT32 SD card** and insert it
+Copy the resulting `.bin` to the **root of a FAT32 SD card** and insert it
 into the board.
 
 ## Flashing
 
 ```bash
-bash run.sh
+# ESP32-S3 (default target):
+bash run.sh --target esp32s3
+
+# ESP32-P4:
+bash run.sh --target esp32p4
 ```
 
 This builds the loader, flashes the bootloader, partition table, and loader
@@ -110,10 +144,13 @@ This builds the loader, flashes the bootloader, partition table, and loader
 Default port is `/dev/ttyACM0`; override with `ESPPORT=...`. Wait for the
 anti-phishing words and the MicroPython REPL prompt (`>>>`).
 
+To flash without rebuilding: `bash run.sh --target <target> flash`
+
 ## Repository layout
 
 See [`docs/code_structure.md`](docs/code_structure.md) for the module map and
-boot-chain data flow. In short: `main/main.c` orchestrates; `main/storage.c`
-reads the SD bundle, `main/esp_image.c` parses the ESP32 image into a load
-plan, and `main/jump.c` performs the bare-metal MMU/copy/jump sequence. Vendor
-keys are compiled in from `keys/<profile>/`.
+boot-chain data flow. In short: `main/main.c` orchestrates; target-specific
+modules in `main/targets/<chip>/` handle SD-card I/O (`storage_*.c`) and the
+bare-metal MMU/copy/jump sequence (`jump_*.c`). `main/esp_image.c` parses the
+ESP32 image into a load plan. Vendor keys are compiled in from
+`keys/<profile>/`.
