@@ -1,9 +1,12 @@
 # ESP-IDF build artifacts
 build/
+uploader/build/
 
 # Generated sdkconfig (regenerated from sdkconfig.defaults)
 sdkconfig
 sdkconfig.old
+uploader/sdkconfig
+uploader/sdkconfig.old
 dependencies.lock
 
 # Managed components

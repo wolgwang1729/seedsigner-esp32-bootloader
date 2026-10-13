@@ -142,7 +142,35 @@ python3 tools/generate_signed_payload.py --platform seedsigner_esp32s3 \
 ```
 
 Copy the resulting `.bin` to the **root of a FAT32 SD card** and insert it
-into the board.
+into the board — or push it directly over UART with no card ejection (see below).
+
+## Pushing the payload without ejecting the SD card (RAM uploader)
+
+Ported from `specter-bootloader`'s `sd_uploader` idea: a tiny RAM-only app is
+loaded into SRAM via `esptool load_ram` and streams the file to the SD card
+over the same USB-UART cable (atomic `.part` + double SHA-256 readback publish,
+per-chunk CRC-32; never touches flash/eFuses, never formats).
+
+```bash
+# ESP32-P4:
+./run.sh --target esp32p4 upload-sd seedsigner_esp32p4.bin
+
+# ESP32-S3:
+./run.sh --target esp32s3 upload-sd seedsigner_esp32s3.bin
+
+# Options: --port /dev/ttyUSB0 --baud 2000000 --name custom.bin
+#          --no-monitor (skip the serial monitor at the end)
+```
+
+This builds `uploader/` for the target, `load_ram`s
+`uploader/build/<target>/seedsigner_sd_uploader.bin`, uploads, verifies, and
+releases — then resets the board into the flashed loader and opens the serial
+monitor so you watch it boot the new payload (same ending as `run.sh ...
+all`). Re-running with an unchanged file skips the transfer (`SKIPPED`) and
+goes straight to reset + monitor.
+`tools/sd_upload.py` also works standalone (`status|list|verify|remove|
+release`; every command loads the RAM image first in the same process).
+See [`uploader/README.md`](uploader/README.md).
 
 ## Flashing
 

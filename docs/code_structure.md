@@ -33,7 +33,8 @@ eFuse-secured Secure Boot V2
 | `main/ld/loader_high.ld` | Relocates the loader footprint to 0x4FF40000+, clear of the payload region (MEMORY redefinition, linked after esp_system). |
 | `keys/` | Vendor signing keys. `keys/test/` = dev keys, `keys/production/` = release keys. The `VENDOR_KEYS_PROFILE` CMake cache var (default `test`) selects the build — switch with `idf.py -DVENDOR_KEYS_PROFILE=production build`. |
 | `components/specter_crypto/` | Specter secure-app-loader component: `bl_section` (bundle format), `bl_signature` (secp256k1 multisig), secp256k1 tree. |
-| `tools/` | `generate_vendor_key.py`, `generate_signed_payload.py`, `package_firmware.py`. |
+| `uploader/` | RAM-only dev app (`seedsigner_sd_uploader.bin`, `load_ram`): SSDU v1 UART service that streams files to the SD card — same slot/pins as the loader, atomic `.part` + double SHA-256 publish. Never touches flash/eFuses. |
+| `tools/` | `generate_vendor_key.py`, `generate_signed_payload.py`, `package_firmware.py`, `sd_upload.py` (SSDU host client: `load_ram` + BEGIN/WRITE/COMMIT). |
 | `pytest_seedsigner_bootloader_p4_stateless_os.py` | Integration test, drives the full boot over serial (`test.sh`). |
 
 ## Data flow

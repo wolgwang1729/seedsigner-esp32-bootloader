@@ -21,6 +21,10 @@ BOOTLOADER_DIR="$SCRIPT_DIR"
 # ------------------------------------------------------------------------------
 TARGET="${TARGET:-esp32p4}"
 ACTION="all"
+UPLOAD_FILE=""
+UPLOAD_NAME=""
+UPLOAD_BAUD="${UPLOAD_BAUD:-921600}"
+NO_MONITOR=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -28,16 +32,42 @@ while [[ $# -gt 0 ]]; do
             TARGET="$2"
             shift 2
             ;;
+        --port|-p)
+            ESPPORT="$2"
+            shift 2
+            ;;
+        --baud)
+            UPLOAD_BAUD="$2"
+            shift 2
+            ;;
+        --name)
+            UPLOAD_NAME="$2"
+            shift 2
+            ;;
+        --no-monitor)
+            NO_MONITOR=1
+            shift
+            ;;
         esp32s3|esp32p4)
             TARGET="$1"
             shift
             ;;
-        build|flash|monitor|all)
+        build|flash|monitor|all|build-uploader|upload-sd)
             ACTION="$1"
             shift
+            # upload-sd consumes an optional file argument: ./run.sh upload-sd <file>
+            if [[ "$ACTION" == "upload-sd" && $# -gt 0 && "$1" != -* ]]; then
+                UPLOAD_FILE="$1"
+                shift
+            fi
             ;;
         *)
-            echo "Usage: $0 [--target esp32s3|esp32p4] [build|flash|monitor|all]"
+            echo "Usage: $0 [--target esp32s3|esp32p4] [--port PORT] [--no-monitor] [build|flash|monitor|all|build-uploader|upload-sd [FILE] [--name SD_NAME] [--baud BAUD]]"
+            echo ""
+            echo "  upload-sd pushes a payload straight to the board's SD card over UART"
+            echo "  (RAM-only uploader, no card ejection), then resets into the loader"
+            echo "  and opens the monitor. --no-monitor skips the monitor. Example:"
+            echo "    $0 --target esp32p4 upload-sd seedsigner_esp32p4.bin"
             exit 1
             ;;
     esac
@@ -86,6 +116,98 @@ check_virtual_efuse() {
 }
 check_virtual_efuse "$BOOTLOADER_DIR/sdkconfig.defaults" "Bootloader (defaults)"
 check_virtual_efuse "$BOOTLOADER_DIR/sdkconfig" "Bootloader (sdkconfig)"
+
+# ------------------------------------------------------------------------------
+# Step 1b: Build RAM-only SD uploader (no flash writes, load_ram image)
+# ------------------------------------------------------------------------------
+build_uploader() {
+    local ub_dir="$BOOTLOADER_DIR/uploader/build/$TARGET"
+    local ub_bin="$ub_dir/seedsigner_sd_uploader.bin"
+    log_step "Build SD uploader (RAM-only) for $TARGET"
+    mkdir -p "$ub_dir"
+    # sdkconfig.defaults already pins APP_BUILD_TYPE_RAM + SDU baud default;
+    # UPLOAD_BAUD override is applied via a generated defaults fragment so the
+    # host (--baud) and device (CONFIG_SDU_UART_BAUD) always agree.
+    # NOTE: all -D paths are absolute: -C makes relative paths resolve under
+    # uploader/ and silently breaks kconfgen otherwise. The fragment lives
+    # OUTSIDE the build dir because `idf.py set-target` wipes it.
+    local baud_defaults="$BOOTLOADER_DIR/uploader/.baud-$TARGET.defaults"
+    echo "CONFIG_SDU_UART_BAUD=$UPLOAD_BAUD" > "$baud_defaults"
+    local need_target=1
+    if [ -f "$ub_dir/sdkconfig" ]; then
+        cur=$(grep '^CONFIG_IDF_TARGET=' "$ub_dir/sdkconfig" | cut -d'"' -f2 || true)
+        [ "$cur" = "$TARGET" ] && need_target=0
+        # Baud change without target change still needs a reconfigure.
+        cur_baud=$(grep '^CONFIG_SDU_UART_BAUD=' "$ub_dir/sdkconfig" | cut -d= -f2 || true)
+        if [ "$cur_baud" != "$UPLOAD_BAUD" ]; then
+            log_info "Baud change ($cur_baud -> $UPLOAD_BAUD): forcing reconfigure."
+            rm -f "$ub_dir/CMakeCache.txt"
+        fi
+    fi
+    if [ "$need_target" = "1" ]; then
+        idf.py -C "$BOOTLOADER_DIR/uploader" -B "$ub_dir" \
+            -D "SDKCONFIG=$ub_dir/sdkconfig" \
+            -D "SDKCONFIG_DEFAULTS=$BOOTLOADER_DIR/uploader/sdkconfig.defaults;$BOOTLOADER_DIR/uploader/sdkconfig.defaults.$TARGET;$baud_defaults" \
+            set-target "$TARGET"
+    fi
+    idf.py -C "$BOOTLOADER_DIR/uploader" -B "$ub_dir" build
+    if [ ! -f "$ub_bin" ] || [ ! -s "$ub_bin" ]; then
+        log_error "Missing uploader artifact: $ub_bin"
+        exit 1
+    fi
+    log_success "Uploader ready: $ub_bin (${UPLOAD_BAUD} baud)."
+}
+
+if [[ "$ACTION" == "build-uploader" ]]; then
+    build_uploader
+    exit 0
+fi
+
+# ------------------------------------------------------------------------------
+# Step 1c: Push a file to the SD card over UART (no ejection)
+# ------------------------------------------------------------------------------
+if [[ "$ACTION" == "upload-sd" ]]; then
+    if [ -z "$UPLOAD_FILE" ]; then
+        # Default to the conventional signed payload for the target.
+        UPLOAD_FILE="$BOOTLOADER_DIR/seedsigner_${TARGET}.bin"
+    fi
+    if [ ! -f "$UPLOAD_FILE" ]; then
+        log_error "File not found: $UPLOAD_FILE"
+        log_error "Sign one first, e.g.: python3 tools/generate_signed_payload.py <micropython.bin> $UPLOAD_FILE"
+        exit 1
+    fi
+    build_uploader
+    log_step "Upload $(basename "$UPLOAD_FILE") to SD via $PORT @ ${UPLOAD_BAUD} baud"
+    if [ ! -e "$PORT" ]; then
+        log_error "Port $PORT not found. Connect the board or set ESPPORT/--port."
+        exit 1
+    fi
+    UP_ARGS=(--chip "$TARGET" --port "$PORT" --baud "$UPLOAD_BAUD"
+             --uploader-bin "$BOOTLOADER_DIR/uploader/build/$TARGET/seedsigner_sd_uploader.bin"
+             upload "$UPLOAD_FILE")
+    if [ -n "$UPLOAD_NAME" ]; then
+        UP_ARGS+=(--name "$UPLOAD_NAME")
+    fi
+    python3 "$BOOTLOADER_DIR/tools/sd_upload.py" "${UP_ARGS[@]}"
+    rc=$?
+    if [ $rc -ne 0 ]; then
+        log_error "SD upload failed (exit $rc). The card was not modified."
+        exit $rc
+    fi
+    log_success "SD upload complete."
+    if [ "$NO_MONITOR" = "1" ]; then
+        log_info "Skipping monitor (--no-monitor). Reset the board to boot the new payload."
+        exit 0
+    fi
+    # The board is still running the RAM uploader: reset it into the flashed
+    # loader so it boots the new payload, then follow the boot in the monitor
+    # (same ending as the `all` action). Reset via ROM (works from any state).
+    log_step "Reset into loader and monitor $PORT (Ctrl-] to exit)"
+    esptool.py --chip "$TARGET" --port "$PORT" \
+        --before default_reset --after hard_reset chip_id > /dev/null 2>&1 || true
+    cd "$BOOTLOADER_DIR" && idf.py -p "$PORT" monitor
+    exit 0
+fi
 
 # ------------------------------------------------------------------------------
 # Step 1: Set Target & Build Loader
@@ -155,9 +277,9 @@ if [[ "$ACTION" == "flash" || "$ACTION" == "all" ]]; then
 
     log_success "Flash complete for $TARGET."
     if [ "$TARGET" == "esp32s3" ]; then
-        log_warn "Reminder: place seedsigner_esp32s3.bin on the SD card root before booting."
+        log_warn "Next: ./run.sh --target esp32s3 upload-sd seedsigner_esp32s3.bin  (no card ejection needed)"
     else
-        log_warn "Reminder: place seedsigner_esp32p4.bin on the SD card root before booting."
+        log_warn "Next: ./run.sh --target esp32p4 upload-sd seedsigner_esp32p4.bin  (no card ejection needed)"
     fi
 fi
 

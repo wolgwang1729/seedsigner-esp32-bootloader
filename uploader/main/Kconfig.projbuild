@@ -1,0 +1,4 @@
+config SDU_UART_BAUD
+    int "Uploader UART baud (must match tools/sd_upload.py --baud)"
+    range 115200 4000000
+    default 921600

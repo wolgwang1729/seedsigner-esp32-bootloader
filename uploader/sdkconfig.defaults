@@ -1,0 +1,42 @@
+# Common defaults for the pure-RAM SD uploader (both targets).
+#
+# APP_BUILD_TYPE_RAM + PURE_RAM_APP builds an image that `esptool load_ram`
+# drops straight into internal SRAM and executes — no flash erase/write, no
+# partition table, no 2nd-stage bootloader, no PSRAM/cache/MMU init by IDF
+# (the app applies the pinned cache split itself, see ram_reservations.c).
+# The ROM loader stays in control until our entry runs, so Secure Boot /
+# eFuses are never touched. Mirrors the reference sd_uploader configuration.
+CONFIG_APP_BUILD_TYPE_RAM=y
+CONFIG_APP_BUILD_TYPE_PURE_RAM_APP=y
+
+CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
+CONFIG_ESP_TASK_WDT_EN=n
+CONFIG_ESP_DEBUG_STUBS_ENABLE=n
+CONFIG_ESP_ERR_TO_NAME_LOOKUP=n
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n
+CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP=n
+CONFIG_LOG_DEFAULT_LEVEL_NONE=y
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_LIBC_NEWLIB_NANO_FORMAT=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
+CONFIG_VFS_SUPPORT_TERMIOS=n
+
+# FATFS: long names (seedsigner_esp32p4.bin > 8.3) via heap, single volume.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=128
+CONFIG_FATFS_CODEPAGE_437=y
+CONFIG_FATFS_VOLUME_COUNT=1
+CONFIG_FATFS_PER_FILE_CACHE=y
+CONFIG_FATFS_FS_LOCK=4
+CONFIG_FATFS_USE_FASTSEEK=n
+
+# Software SHA-256 (no crypto peripheral dependency in pure-RAM mode).
+CONFIG_MBEDTLS_HARDWARE_SHA=n
+
+# Uploader UART baud. Must match tools/sd_upload.py --baud.
+# 921600 is reliable on every bridge (CH343 / USB-JTAG); rebuild with
+# 2000000/4000000 for speed once the bench is qualified.
+CONFIG_SDU_UART_BAUD=921600
