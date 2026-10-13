@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import struct
 import zlib
 import sys
@@ -51,20 +52,25 @@ def build_section(name, version, payload, attributes=b''):
     return header + payload
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: package_firmware.py <input.bin> <output.bin>")
-        sys.exit(1)
-        
-    in_file = sys.argv[1]
-    out_file = sys.argv[2]
-    
+    parser = argparse.ArgumentParser(description="Package raw firmware into Specter bundle")
+    parser.add_argument("input", help="Raw input binary")
+    parser.add_argument("output", help="Packaged output binary")
+    parser.add_argument("--platform", default="seedsigner_esp32p4",
+                        choices=["seedsigner_esp32p4", "seedsigner_esp32s3"],
+                        help="Target platform identifier (default: seedsigner_esp32p4)")
+    parser.add_argument("--version", type=int, default=1, help="Firmware version (default: 1)")
+    args = parser.parse_args()
+
+    in_file = args.input
+    out_file = args.output
+
     with open(in_file, 'rb') as f:
         payload = f.read()
-        
+
     # Main firmware section
     # bl_attr_platform = 4, bl_attr_algorithm = 1
-    attrs = pack_attribute(4, "seedsigner_esp32p4") + pack_attribute(1, "secp256k1-sha256")
-    main_section = build_section("main", 1, payload, attrs)
+    attrs = pack_attribute(4, args.platform) + pack_attribute(1, "secp256k1-sha256")
+    main_section = build_section("main", args.version, payload, attrs)
     
     # Signature section (dummy 64-byte payload)
     # The actual Specter bootloader expects a specific structure for signature
@@ -75,8 +81,8 @@ def main():
     with open(out_file, 'wb') as f:
         f.write(main_section)
         f.write(sig_section)
-        
-    print(f"Packaged firmware: {out_file}")
+
+    print(f"Packaged firmware: {out_file} (Platform: {args.platform}, Version: {args.version})")
 
 if __name__ == "__main__":
     main()
