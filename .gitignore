@@ -20,3 +20,7 @@ secure_boot_signing_key.pem
 # Vendor payload signing key — private, never commit. Generate with:
 #   python3 tools/generate_vendor_key.py
 payload_signing_key.pem
+
+# Signed payload bundles — generated locally, never commit. Generate with:
+#   python3 tools/generate_signed_payload.py <micropython.bin> seedsigner_esp32p4.bin
+seedsigner_*.bin

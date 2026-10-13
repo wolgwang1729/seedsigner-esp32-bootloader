@@ -117,8 +117,12 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
             memcpy(plan.fake_flash + write_off, psram_buf + payload_offset + offset, seg.data_len);
             plan.mmu_mapping_count++;
             ESP_LOGI(TAG, "  -> fake_flash+0x%lX", (unsigned long)write_off);
-        } else if (seg.load_addr >= 0x4FF00000 && seg.load_addr < 0x4FFC0000) {
-            // Direct segment → deferred copy into internal SRAM
+        } else if ((seg.load_addr >= 0x4FF00000 && seg.load_addr < 0x4FFC0000) ||
+                   /* TCM .tcm.text (SOC_SPM 0x30100000-0x30102000, 8KB: rtc_clk_mpll_*) */
+                   (seg.load_addr >= 0x30100000 && seg.load_addr < 0x30102000) ||
+                   /* LP RAM (SOC_LP_RAM 0x50108000-0x50110000, 32KB: rtc_noinit/sleep) */
+                   (seg.load_addr >= 0x50108000 && seg.load_addr < 0x50110000)) {
+            // Direct segment → deferred copy into internal SRAM/TCM/LP-RAM
             pending_copy_t *c = &plan.direct_copies[plan.copy_count];
             c->dest = (void *)seg.load_addr;
             c->src  = (void *)(psram_buf + payload_offset + offset);
