@@ -14,6 +14,7 @@
 // --- Specter secure app loader (specter_crypto component) ---
 #include "bl_section.h"
 #include "bl_signature.h"
+#include "memzero.h"
 #include "anti_phish.h"
 
 // --- Vendor payload signing keys (keys/<profile>/vendor_keys.c) ---
@@ -83,7 +84,7 @@ void app_main(void)
 
         if (!blsect_validate_header(main_hdr)) {
             ESP_LOGE(TAG, "Invalid Specter section header. Halting.");
-            memset(psram_buf, 0, fw_size);
+            memzero(psram_buf, fw_size);
             while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
 
@@ -93,14 +94,14 @@ void app_main(void)
             strcmp(platform_str, EXPECTED_PLATFORM) != 0) {
             ESP_LOGE(TAG, "Invalid platform attribute: '%s' (expected %s). Halting.",
                      platform_str, EXPECTED_PLATFORM);
-            memset(psram_buf, 0, fw_size);
+            memzero(psram_buf, fw_size);
             while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
 
         ESP_LOGI(TAG, "Firmware version: %lu", (unsigned long)main_hdr->pl_ver);
         if (main_hdr->pl_ver < 1) {
             ESP_LOGE(TAG, "Firmware downgrade detected! Halting.");
-            memset(psram_buf, 0, fw_size);
+            memzero(psram_buf, fw_size);
             while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
 
@@ -113,7 +114,7 @@ void app_main(void)
             ESP_LOGE(TAG, "Payload size out of bounds (%lu + %lu > %lu loaded). Halting.",
                      (unsigned long)sizeof(bl_section_t), (unsigned long)main_hdr->pl_size,
                      (unsigned long)fw_size);
-            memset(psram_buf, 0, fw_size);
+            memzero(psram_buf, fw_size);
             while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
 
@@ -123,7 +124,7 @@ void app_main(void)
                                     (bl_addr_t)(psram_buf + sizeof(bl_section_t)),
                                     &hash_obj, 0)) {
             ESP_LOGE(TAG, "Hash calculation failed. Halting.");
-            memset(psram_buf, 0, fw_size);
+            memzero(psram_buf, fw_size);
             while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
 
@@ -136,13 +137,13 @@ void app_main(void)
             const uint8_t *bundle_end = psram_buf + fw_size;
             if ((const uint8_t *)(sig_hdr + 1) > bundle_end) {
                 ESP_LOGE(TAG, "Signature section header out of bounds. Halting.");
-                memset(psram_buf, 0, fw_size);
+                memzero(psram_buf, fw_size);
                 while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
             }
             if ((size_t)sig_hdr->pl_size > fw_size ||
                 (const uint8_t *)(sig_hdr + 1) + (size_t)sig_hdr->pl_size > bundle_end) {
                 ESP_LOGE(TAG, "Signature section payload out of bounds. Halting.");
-                memset(psram_buf, 0, fw_size);
+                memzero(psram_buf, fw_size);
                 while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
             }
         }
@@ -166,18 +167,18 @@ void app_main(void)
                                  (int)sig_res, SIG_THRESHOLD);
                     }
                     ESP_LOGE(TAG, "HALTING execution.");
-                    memset(psram_buf, 0, fw_size);
+                    memzero(psram_buf, fw_size);
                     while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
                 }
                 ESP_LOGI(TAG, "Signature verification PASSED!");
             } else {
                 ESP_LOGE(TAG, "Failed to build signature message. Halting.");
-                memset(psram_buf, 0, fw_size);
+                memzero(psram_buf, fw_size);
                 while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
             }
         } else {
             ESP_LOGE(TAG, "Signature section missing or invalid. Halting.");
-            memset(psram_buf, 0, fw_size);
+            memzero(psram_buf, fw_size);
             while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
         payload_offset = sizeof(bl_section_t);
@@ -185,7 +186,7 @@ void app_main(void)
         ESP_LOGE(TAG, "No Specter section header (magic 0x%08lX) — raw images are not "
                       "accepted from the SD card. Halting.",
                  (unsigned long)main_hdr->magic);
-        memset(psram_buf, 0, fw_size);
+        memzero(psram_buf, fw_size);
         while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 
@@ -197,7 +198,7 @@ void app_main(void)
     esp_err_t ap_err = verify_anti_phishing_proof(words);
     if (ap_err == ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "FLASH TAMPERED — halting boot");
-        memset(psram_buf, 0, fw_size);
+        memzero(psram_buf, fw_size);
         while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 
