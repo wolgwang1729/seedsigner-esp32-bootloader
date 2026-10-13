@@ -26,11 +26,11 @@ Both private keys are gitignored and must be generated locally, never commit the
 
 ### ESP32-P4
 
-<video src="https://github.com/user-attachments/assets/9826a537-8af3-4570-89bd-2bad9e608e5e" controls width="100%"></video>
+[![ESP32-P4 Stateless Secure Boot Demo](https://img.youtube.com/vi/jkk55UFmpCI/maxresdefault.jpg)](https://www.youtube.com/watch?v=jkk55UFmpCI)
 
 ### ESP32-S3
 
-<video src="https://github.com/user-attachments/assets/0011ab24-60c6-4ac4-83d1-0760f266ac68" controls width="100%"></video>
+[![ESP32-S3 Stateless Secure Boot Demo](https://img.youtube.com/vi/al7gvf-3Q34/maxresdefault.jpg)](https://www.youtube.com/watch?v=al7gvf-3Q34)
 
 ## Supported Targets
 
