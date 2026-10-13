@@ -191,13 +191,20 @@ void app_main(void)
     }
 
     // ----------------------------------------------------------------
-    // Step 3: Anti-phishing tamper detection
+    // Step 3: Anti-phishing tamper detection (fail-closed: any error halts)
     // ----------------------------------------------------------------
-    provision_flash_fill();
+    esp_err_t prov_err = provision_flash_fill();
+    if (prov_err != ESP_OK) {
+        ESP_LOGE(TAG, "Flash fill provisioning failed (%s). Halting.",
+                 esp_err_to_name(prov_err));
+        memzero(psram_buf, fw_size);
+        while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
     char words[BIP39_WORD_COUNT][12];
     esp_err_t ap_err = verify_anti_phishing_proof(words);
-    if (ap_err == ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "FLASH TAMPERED — halting boot");
+    if (ap_err != ESP_OK) {
+        ESP_LOGE(TAG, "Anti-phishing verification failed (%s) — halting boot.",
+                 esp_err_to_name(ap_err));
         memzero(psram_buf, fw_size);
         while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
