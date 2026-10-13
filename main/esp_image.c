@@ -1,5 +1,7 @@
 // ESP32 image parser + load-plan builder supporting both ESP32-P4 and ESP32-S3.
 #include <string.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,14 +22,28 @@
 
 static const char *TAG = "SEEDSIGNER_LOADER";
 
-image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
+image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset,
+                            size_t fw_size)
 {
     image_plan_t plan;
     memset(&plan, 0, sizeof(plan));
 
+    // Validate the bundle cursor before touching it: every read below must
+    // stay inside [psram_buf, psram_buf + fw_size).
+    if (!psram_buf) {
+        ESP_LOGE(TAG, "NULL psram buffer. Halting.");
+        while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+    if ((size_t)payload_offset > fw_size ||
+        fw_size - (size_t)payload_offset < sizeof(esp_image_header_t)) {
+        ESP_LOGE(TAG, "Payload offset %lu out of bounds (%lu loaded). Halting.",
+                 (unsigned long)payload_offset, (unsigned long)fw_size);
+        while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+
     // Step 3: validate the raw ESP32 image header.
     __attribute__((aligned(4))) esp_image_header_t hdr;
-    hdr = *(esp_image_header_t *)(psram_buf + payload_offset);
+    memcpy(&hdr, psram_buf + payload_offset, sizeof(hdr));
 
     if (hdr.magic != ESP_IMAGE_MAGIC) {
         ESP_LOGE(TAG, "Bad image magic: 0x%02X (expected 0xE9). Halting.", hdr.magic);
@@ -42,10 +58,17 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
     plan.entry_addr = hdr.entry_addr;
 
     // Step 4: first pass — measure PSRAM MMU footprint.
+    // offset is relative to the ESP image start (after payload_offset); all
+    // sums are computed in size_t to avoid 32-bit wraparound.
     uint32_t max_offset = 0;
-    uint32_t offset     = sizeof(esp_image_header_t);
+    size_t offset = sizeof(esp_image_header_t);
 
     for (int i = 0; i < hdr.segment_count; i++) {
+        // Bounds-check segment header read.
+        if (offset + sizeof(esp_image_segment_header_t) > fw_size - payload_offset) {
+            ESP_LOGE(TAG, "Segment %d header out of bounds. Halting.", i);
+            while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
         esp_image_segment_header_t seg;
         memcpy(&seg, psram_buf + payload_offset + offset, sizeof(seg));
         offset += sizeof(seg);
@@ -53,16 +76,32 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
             ESP_LOGE(TAG, "Segment %d bad length %lu. Halting.", i, (unsigned long)seg.data_len);
             while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
+        // Bounds-check segment data extent.
+        if ((size_t)seg.data_len > fw_size - payload_offset - offset) {
+            ESP_LOGE(TAG, "Segment %d data out of bounds (len %lu). Halting.",
+                     i, (unsigned long)seg.data_len);
+            while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
 
 #if CONFIG_IDF_TARGET_ESP32P4
         if (seg.load_addr >= 0x48000000 && seg.load_addr < 0x4C000000) {
-            uint32_t end = (seg.load_addr - 0x48000000) + seg.data_len;
+            uint64_t end64 = (uint64_t)(seg.load_addr - 0x48000000) + seg.data_len;
+            if (end64 > UINT32_MAX) {
+                ESP_LOGE(TAG, "Segment %d end overflows. Halting.", i);
+                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
+            uint32_t end = (uint32_t)end64;
             if (end > max_offset) max_offset = end;
         }
 #elif CONFIG_IDF_TARGET_ESP32S3
         if ((seg.load_addr >= 0x42000000 && seg.load_addr < 0x44000000) ||
             (seg.load_addr >= 0x3C000000 && seg.load_addr < 0x3E000000)) {
-            uint32_t end = (seg.load_addr & SOC_MMU_LINEAR_ADDR_MASK) + seg.data_len;
+            uint64_t end64 = (uint64_t)(seg.load_addr & SOC_MMU_LINEAR_ADDR_MASK) + seg.data_len;
+            if (end64 > UINT32_MAX) {
+                ESP_LOGE(TAG, "Segment %d end overflows. Halting.", i);
+                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
+            uint32_t end = (uint32_t)end64;
             if (end > max_offset) max_offset = end;
         }
 #endif
@@ -94,18 +133,36 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
     offset = sizeof(esp_image_header_t);
 
     for (int i = 0; i < hdr.segment_count; i++) {
+        if (offset + sizeof(esp_image_segment_header_t) > fw_size - payload_offset) {
+            ESP_LOGE(TAG, "Segment %d header out of bounds (2nd pass). Halting.", i);
+            while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
         esp_image_segment_header_t seg;
         memcpy(&seg, psram_buf + payload_offset + offset, sizeof(seg));
         offset += sizeof(seg);
+        if (seg.data_len > MAX_FIRMWARE_SIZE) {
+            ESP_LOGE(TAG, "Segment %d bad length %lu (2nd pass). Halting.",
+                     i, (unsigned long)seg.data_len);
+            while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
+        if ((size_t)seg.data_len > fw_size - payload_offset - offset) {
+            ESP_LOGE(TAG, "Segment %d data out of bounds (2nd pass). Halting.", i);
+            while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
 
         ESP_LOGI(TAG, "Seg %d: addr=0x%08lX len=%lu",
                  i, (unsigned long)seg.load_addr, (unsigned long)seg.data_len);
 
 #if CONFIG_IDF_TARGET_ESP32P4
         if (seg.load_addr >= 0x48000000 && seg.load_addr < 0x4C000000) {
+            if (plan.mmu_mapping_count >= MAX_MMU_MAPPINGS) {
+                ESP_LOGE(TAG, "Exceeded MAX_MMU_MAPPINGS (%d). Halting.", MAX_MMU_MAPPINGS);
+                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
             // Mapped segment → stage into fake_flash
+            uint64_t va_end64 = (uint64_t)seg.load_addr + seg.data_len + 0xFFFFu - 1u;
             uint32_t va_start = seg.load_addr & ~0xFFFF;
-            uint32_t va_end   = (seg.load_addr + seg.data_len + 0xFFFF - 1) & ~0xFFFF;
+            uint32_t va_end   = (uint32_t)(va_end64 & ~(uint64_t)0xFFFF);
             if (seg.data_len == 0) va_end = va_start;
 
             mmu_mapping_t *m = &plan.mmu_mappings[plan.mmu_mapping_count];
@@ -114,6 +171,11 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
             m->paddr = plan.flash_paddr + (va_start - 0x48000000);
 
             uint32_t write_off = seg.load_addr - 0x48000000;
+            if (seg.data_len > plan.max_offset ||
+                write_off > plan.max_offset - seg.data_len) {
+                ESP_LOGE(TAG, "Segment %d write exceeds fake_flash buffer. Halting.", i);
+                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
             memcpy(plan.fake_flash + write_off, psram_buf + payload_offset + offset, seg.data_len);
             plan.mmu_mapping_count++;
             ESP_LOGI(TAG, "  -> fake_flash+0x%lX", (unsigned long)write_off);
@@ -122,9 +184,13 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
                    (seg.load_addr >= 0x30100000 && seg.load_addr < 0x30102000) ||
                    /* LP RAM (SOC_LP_RAM 0x50108000-0x50110000, 32KB: rtc_noinit/sleep) */
                    (seg.load_addr >= 0x50108000 && seg.load_addr < 0x50110000)) {
+            if (plan.copy_count >= MAX_DIRECT_COPIES) {
+                ESP_LOGE(TAG, "Exceeded MAX_DIRECT_COPIES (%d). Halting.", MAX_DIRECT_COPIES);
+                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
             // Direct segment → deferred copy into internal SRAM/TCM/LP-RAM
             pending_copy_t *c = &plan.direct_copies[plan.copy_count];
-            c->dest = (void *)seg.load_addr;
+            c->dest = (void *)(uintptr_t)seg.load_addr;
             c->src  = (void *)(psram_buf + payload_offset + offset);
             c->len  = seg.data_len;
             plan.copy_count++;
@@ -140,10 +206,15 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
         bool is_drom = (seg.load_addr >= 0x3C000000 && seg.load_addr < 0x3E000000);
 
         if (is_irom || is_drom) {
+            if (plan.mmu_mapping_count >= MAX_MMU_MAPPINGS) {
+                ESP_LOGE(TAG, "Exceeded MAX_MMU_MAPPINGS (%d). Halting.", MAX_MMU_MAPPINGS);
+                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
             // Mapped segment → stage into fake_flash at its linear offset
             uint32_t linear   = seg.load_addr & SOC_MMU_LINEAR_ADDR_MASK;
+            uint64_t va_end64 = (uint64_t)seg.load_addr + seg.data_len + 0xFFFFu - 1u;
             uint32_t va_start = seg.load_addr & ~0xFFFF;
-            uint32_t va_end   = (seg.load_addr + seg.data_len + 0xFFFF - 1) & ~0xFFFF;
+            uint32_t va_end   = (uint32_t)(va_end64 & ~(uint64_t)0xFFFF);
             if (seg.data_len == 0) va_end = va_start;
 
             mmu_mapping_t *m = &plan.mmu_mappings[plan.mmu_mapping_count];
@@ -152,6 +223,11 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
             m->paddr = plan.flash_paddr + (va_start & SOC_MMU_LINEAR_ADDR_MASK);
 
             uint32_t write_off = linear;
+            if (seg.data_len > plan.max_offset ||
+                write_off > plan.max_offset - seg.data_len) {
+                ESP_LOGE(TAG, "Segment %d write exceeds fake_flash buffer. Halting.", i);
+                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
             memcpy(plan.fake_flash + write_off, psram_buf + payload_offset + offset, seg.data_len);
             plan.mmu_mapping_count++;
             ESP_LOGI(TAG, "  -> fake_flash+0x%lX", (unsigned long)write_off);
@@ -159,8 +235,17 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
                    (seg.load_addr >= 0x3FC88000 && seg.load_addr < 0x3FD00000) ||
                    (seg.load_addr >= 0x50000000 && seg.load_addr < 0x50020000) ||
                    (seg.load_addr >= 0x600FE000 && seg.load_addr < 0x60100000)) {
+            if (plan.copy_count >= MAX_DIRECT_COPIES) {
+                ESP_LOGE(TAG, "Exceeded MAX_DIRECT_COPIES (%d). Halting.", MAX_DIRECT_COPIES);
+                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
             // Direct segment → check collision with loader JMP zone
-            uint32_t seg_end = seg.load_addr + seg.data_len;
+            uint64_t seg_end64 = (uint64_t)seg.load_addr + seg.data_len;
+            if (seg_end64 > UINT32_MAX) {
+                ESP_LOGE(TAG, "Segment %d end overflows. Halting.", i);
+                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+            }
+            uint32_t seg_end = (uint32_t)seg_end64;
             if (seg.load_addr < JMP_ZONE_BASE && seg_end > JMP_ZONE_BASE) {
                 ESP_LOGE(TAG, "Segment %d (0x%08lX-0x%08lX) collides with loader's JMP zone (0x%08X-0x%08X). Halting.",
                          i, (unsigned long)seg.load_addr, (unsigned long)seg_end,
@@ -173,7 +258,7 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset)
             }
 
             pending_copy_t *c = &plan.direct_copies[plan.copy_count];
-            c->dest = (void *)seg.load_addr;
+            c->dest = (void *)(uintptr_t)seg.load_addr;
             c->src  = (void *)(psram_buf + payload_offset + offset);
             c->len  = seg.data_len;
             plan.copy_count++;

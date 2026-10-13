@@ -212,7 +212,7 @@ void app_main(void)
     // ----------------------------------------------------------------
     // Steps 4-6: Parse ESP32 image, map PSRAM, and prepare direct copies
     // ----------------------------------------------------------------
-    image_plan_t plan = esp_image_plan(psram_buf, payload_offset);
+    image_plan_t plan = esp_image_plan(psram_buf, payload_offset, fw_size);
 
     // ----------------------------------------------------------------
     // Step 7: Commit load plan into safe hand-off structures

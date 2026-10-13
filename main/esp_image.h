@@ -51,6 +51,10 @@ typedef struct {
 // MMU-mapped segments into a fresh aligned fake_flash buffer, and records
 // direct-to-SRAM segments as deferred copies.
 //
+// fw_size is the total Specter bundle size loaded into psram_buf; every
+// segment header/data read is bounds-checked against it (fail-closed).
+//
 // Fatal errors halt inside (the bootloader fails closed by design). On success
 // the caller must NOT free psram_buf — direct copies still point into it.
-image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset);
+image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset,
+                            size_t fw_size);
