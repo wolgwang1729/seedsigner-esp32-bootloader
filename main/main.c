@@ -24,6 +24,7 @@
 #include "loader_config.h"
 #include "storage.h"
 #include "esp_image.h"
+#include "bundle_validate.h"
 #include "jump.h"
 
 static const char *TAG = "SEEDSIGNER_LOADER";
@@ -110,7 +111,8 @@ void app_main(void)
         // protocol maximum, not the buffer boundary — without this, a
         // corrupt/malicious bundle can force an OOB read in
         // blsect_hash_over_flash() and an OOB deref of sig_hdr below.
-        if (sizeof(bl_section_t) + (size_t)main_hdr->pl_size > fw_size) {
+        // (Logic lives in bundle_validate.c so host_test can cover it.)
+        if (bundle_validate_main_size(main_hdr->pl_size, fw_size) != ESP_OK) {
             ESP_LOGE(TAG, "Payload size out of bounds (%lu + %lu > %lu loaded). Halting.",
                      (unsigned long)sizeof(bl_section_t), (unsigned long)main_hdr->pl_size,
                      (unsigned long)fw_size);
@@ -131,21 +133,12 @@ void app_main(void)
         // Signature section immediately follows the main payload.
         // The main_end check above guarantees sig_hdr itself is in-bounds;
         // validate the signature payload extent before dereferencing it.
-        bl_section_t *sig_hdr = (bl_section_t *)(psram_buf + sizeof(bl_section_t) +
-                                                 main_hdr->pl_size);
-        {
-            const uint8_t *bundle_end = psram_buf + fw_size;
-            if ((const uint8_t *)(sig_hdr + 1) > bundle_end) {
-                ESP_LOGE(TAG, "Signature section header out of bounds. Halting.");
-                memzero(psram_buf, fw_size);
-                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
-            }
-            if ((size_t)sig_hdr->pl_size > fw_size ||
-                (const uint8_t *)(sig_hdr + 1) + (size_t)sig_hdr->pl_size > bundle_end) {
-                ESP_LOGE(TAG, "Signature section payload out of bounds. Halting.");
-                memzero(psram_buf, fw_size);
-                while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
-            }
+        const bl_section_t *sig_hdr = NULL;
+        if (bundle_validate_sig_section(psram_buf, fw_size, main_hdr->pl_size,
+                                         &sig_hdr) != ESP_OK) {
+            ESP_LOGE(TAG, "Signature section out of bounds. Halting.");
+            memzero(psram_buf, fw_size);
+            while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
         if (sig_hdr->magic == BL_SECT_MAGIC && blsect_is_signature(sig_hdr)) {
             uint8_t sig_msg[BL_SIG_MSG_MAX];

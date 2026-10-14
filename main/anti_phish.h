@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdint.h>
 #include "esp_err.h"
 
 #define BIP39_WORD_COUNT 4

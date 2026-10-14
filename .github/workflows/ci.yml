@@ -7,6 +7,17 @@ on:
     branches: [ "main" ]
 
 jobs:
+  host-tests:
+    name: Host Unit Tests (no hardware)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Bootloader
+        uses: actions/checkout@v4
+      - name: Install host toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc g++ make
+      - name: Run host tests (P4 + S3)
+        run: make -C host_test test
+
   build-and-test:
     name: Build Payload & Bootloader (${{ matrix.target }})
     # Using standard ubuntu-latest so we have access to Docker for both builds

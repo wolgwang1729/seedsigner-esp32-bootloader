@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "loader_config.h"
 #include "jump.h"
@@ -44,6 +46,9 @@ typedef struct {
     int           mmu_mapping_count;
     pending_copy_t direct_copies[MAX_DIRECT_COPIES];
     int           copy_count;
+    bool          fatal;            // host_test only: true if input rejected.
+                                    // On target this field is always false on
+                                    // return (fatal errors halt inside).
 } image_plan_t;
 
 // Validate the raw ESP32 image and build the load plan (app_main steps 3-6).

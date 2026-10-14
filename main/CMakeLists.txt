@@ -39,7 +39,7 @@ else()
 endif()
 
 idf_component_register(
-    SRCS "main.c" "esp_image.c" "anti_phish.c" "bip39_wordlist.c"
+    SRCS "main.c" "esp_image.c" "bundle_validate.c" "anti_phish.c" "bip39_wordlist.c"
          ${TARGET_SRCS}
          "${KEYS_DIR}/${VENDOR_KEYS_PROFILE}/vendor_keys.c"
     PRIV_INCLUDE_DIRS "${KEYS_DIR}" "."
