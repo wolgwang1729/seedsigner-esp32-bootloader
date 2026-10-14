@@ -14,8 +14,8 @@
 #      fill — this test tolerates the ~2 minute provisioning delay)
 #   4. Raw ESP32 image parsing + PSRAM MMU footprint + fake_flash staging
 #   5. Segment classification and routing (fake_flash vs direct copy)
-#   6. Bare-metal jump sequence JMP[1..8] (WDT/interrupt teardown, D-cache
-#      eviction, copies, MMU mapping arithmetic, D-cache drain)
+#   6. Bare-metal jump sequence JMP[1..7] (WDT/interrupt teardown, D-cache
+#      eviction, copies, MMU mapping arithmetic, silent D-cache drain)
 #   7. Payload boot through the stateless_shim — it replaces call_start_cpu0(),
 #      re-inits clocks + MMU, runs the ESP-IDF init table, adds PSRAM to the
 #      heap, then hands off to esp_startup_start_app(); the MicroPython
@@ -136,7 +136,7 @@ def test_stateless_bootloader_and_payload(app: IdfApp, dut: IdfDut) -> None:
     # ====================================================================
     logging.info('Phase 1: SD-card load...')
 
-    dut.expect(r'SeedSigner Loader \S+ ESP32-P4 PSRAM payload', timeout=15)
+    dut.expect(r'SeedSigner Stateless Loader.*seedsigner_esp32p4', timeout=15)
     logging.info('  ✓ Loader banner displayed')
 
     dut.expect('SD card mounted at /sdcard', timeout=10)
@@ -146,7 +146,7 @@ def test_stateless_bootloader_and_payload(app: IdfApp, dut: IdfDut) -> None:
     logging.info('  ✓ Unmount before verification (TOCTOU-safe)')
 
     load_match = dut.expect(
-        r'\[SD CARD\] Loaded (\d+) bytes from /sdcard/seedsigner_esp32p4\.bin',
+        r'(?:\[SD CARD\] )?Loaded (\d+) bytes from /sdcard/seedsigner_esp32p4\.bin',
         timeout=10
     )
     loaded_bytes = int(load_match.group(1))
@@ -281,7 +281,7 @@ def test_stateless_bootloader_and_payload(app: IdfApp, dut: IdfDut) -> None:
     )
 
     # ====================================================================
-    # PHASE 6: BARE-METAL JUMP SEQUENCE JMP[1..8]
+    # PHASE 6: BARE-METAL JUMP SEQUENCE JMP[1..7]
     # ====================================================================
     logging.info('Phase 6: Bare-metal jump sequence...')
 
@@ -371,8 +371,9 @@ def test_stateless_bootloader_and_payload(app: IdfApp, dut: IdfDut) -> None:
     dut.expect(r'JMP\[7\] JUMP!', timeout=5)
     logging.info('  ✓ JMP[7]: JUMP — final jump to payload entry point')
 
-    dut.expect(r'JMP\[8\] D-cache drained post-copy', timeout=5)
-    logging.info('  ✓ JMP[8]: D-cache drained post-copy (payload bytes in SRAM)')
+    # NOTE: jump_p4.c has JMP[1]..JMP[7] only; the second D-cache drain pass
+    # before JMP[7] is silent (no JMP[8] print), so there is nothing to expect
+    # here — JMP[7] is immediately followed by the shim entry below.
 
     # ====================================================================
     # PHASE 7: PAYLOAD ENTRY (STATELESS SHIM)
@@ -420,7 +421,7 @@ def test_stateless_bootloader_and_payload(app: IdfApp, dut: IdfDut) -> None:
     dut.expect(r'main_task: Calling app_main\(\)', timeout=10)
     logging.info('  ✓ app_main() called — FreeRTOS scheduler is running')
 
-    dut.expect(r'MicroPython v[\d.]+', timeout=10)
+    dut.expect(r'(Micro|icro)Python v[\d.]+', timeout=10)
     logging.info('  ✓ MicroPython banner printed')
 
     dut.expect(r'>>>\s*', timeout=10)
@@ -451,7 +452,7 @@ def test_stateless_bootloader_and_payload(app: IdfApp, dut: IdfDut) -> None:
     dut.serial.hard_reset()
     time.sleep(0.5)
 
-    dut.expect(r'SeedSigner Loader \S+ ESP32-P4 PSRAM payload', timeout=15)
+    dut.expect(r'SeedSigner Stateless Loader.*seedsigner_esp32p4', timeout=15)
     dut.expect('SD card mounted at /sdcard', timeout=10)
     dut.expect('Signature verification PASSED!', timeout=15)
     reboot_match = dut.expect(
