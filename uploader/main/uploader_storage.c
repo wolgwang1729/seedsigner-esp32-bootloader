@@ -395,6 +395,23 @@ ssdu_status_t ssdu_verify_existing(const char *name, uint64_t size,
         return SSDU_ERR_RANGE;
     char path[192];
     snprintf(path, sizeof(path), SSDU_MOUNT_POINT "/%s", name);
+    /* Fast path: sizes differ, so contents cannot match. Report mismatch
+     * without reading: verify_path() below treats count > ssdu_length as a
+     * failure and would misreport IO_ERROR (wedging the session UNCERTAIN)
+     * instead of DIGEST_MISMATCH. (The length guard stays correct for the
+     * COMMIT readbacks, where the file must be exactly the announced size.)
+     * The DIGEST report shape is unchanged: observed_length carries the real
+     * SD size, observed digest is zeroed (nothing was hashed). */
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return io_fail();
+    if (!S_ISREG(st.st_mode))
+        return SSDU_ERR_PATH;
+    if ((uint64_t)st.st_size != size) {
+        ssdu_observed_len = (uint64_t)st.st_size;
+        memset(ssdu_observed, 0, 32);
+        return SSDU_ERR_DIGEST;
+    }
     uint64_t keep_len = ssdu_length;
     uint8_t keep_d[32];
     memcpy(keep_d, ssdu_digest, 32);
