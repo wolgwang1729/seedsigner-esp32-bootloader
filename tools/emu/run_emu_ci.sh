@@ -175,9 +175,12 @@ run_target() {
     set -e
     log "esp-emu exit code: $rc (log: $logf)"
 
+    # The banner's version text varies with build provenance: a fresh CI
+    # builder checkout has no git tags, so it reads "MicroPython <hash> ..."
+    # rather than "MicroPython v1.27.0-...". Match only the stable prefix.
     python3 "$SCRIPT_DIR/check_repl.py" "$logf" \
         "Signature verification PASSED!" \
-        "MicroPython v" \
+        "MicroPython " \
         "$EMU_EXIT_ON" \
         "SYS esp32"
 }
