@@ -1,0 +1,218 @@
+--- a/main/targets/esp32s3/storage_s3.c
++++ b/main/targets/esp32s3/storage_s3.c
+@@ -21,6 +21,64 @@
+ 
+ static const char *TAG = "SEEDSIGNER_LOADER";
+ 
++#ifdef EMU_FLASH_PAYLOAD
++// EMULATION-ONLY (scratch copy): the signed bundle is baked into raw flash at
++// EMU_FLASH_PAYLOAD_OFFSET (Specter header) so the ESP image inside lands at
++// 0x140000 (64KB-aligned, as the MMU mapping requires). Reads the bundle via
++// the ROM SPI-flash function instead of touching the (unemulated) SD card.
++#define EMU_FLASH_PAYLOAD_OFFSET 0x13FF00
++#include "esp_rom_spiflash.h"
++#include "bl_section.h"
++
++static uint8_t *load_firmware_from_flash_emu(size_t *out_size)
++{
++    bl_section_t main_hdr;
++    if (esp_rom_spiflash_read(EMU_FLASH_PAYLOAD_OFFSET,
++                              (uint32_t *)&main_hdr,
++                              sizeof(main_hdr)) != ESP_OK) {
++        ESP_LOGE(TAG, "EMU: failed to read bundle header from flash 0x%X. Halting.",
++                 EMU_FLASH_PAYLOAD_OFFSET);
++        return NULL;
++    }
++    if (main_hdr.magic != BL_SECT_MAGIC) {
++        ESP_LOGE(TAG, "EMU: no Specter header at flash 0x%X (magic 0x%08lX). Halting.",
++                 EMU_FLASH_PAYLOAD_OFFSET, (unsigned long)main_hdr.magic);
++        return NULL;
++    }
++    bl_section_t sig_hdr;
++    uint32_t sig_off = EMU_FLASH_PAYLOAD_OFFSET + sizeof(bl_section_t) + main_hdr.pl_size;
++    if (esp_rom_spiflash_read(sig_off, (uint32_t *)&sig_hdr, sizeof(sig_hdr)) != ESP_OK) {
++        ESP_LOGE(TAG, "EMU: failed to read signature header. Halting.");
++        return NULL;
++    }
++    if (sig_hdr.magic != BL_SECT_MAGIC || !blsect_is_signature(&sig_hdr)) {
++        ESP_LOGE(TAG, "EMU: signature section missing or invalid. Halting.");
++        return NULL;
++    }
++    size_t total = sizeof(bl_section_t) + main_hdr.pl_size
++                 + sizeof(bl_section_t) + sig_hdr.pl_size;
++    if (total == 0 || total > MAX_FIRMWARE_SIZE) {
++        ESP_LOGE(TAG, "EMU: invalid bundle size %u. Halting.", (unsigned)total);
++        return NULL;
++    }
++    uint8_t *psram_buf = heap_caps_aligned_alloc(65536, total, MALLOC_CAP_SPIRAM);
++    if (!psram_buf) {
++        ESP_LOGE(TAG, "EMU: PSRAM alloc failed (%u bytes). Halting.", (unsigned)total);
++        return NULL;
++    }
++    if (esp_rom_spiflash_read(EMU_FLASH_PAYLOAD_OFFSET,
++                              (uint32_t *)psram_buf, total) != ESP_OK) {
++        ESP_LOGE(TAG, "EMU: failed to read bundle from flash. Halting.");
++        free(psram_buf);
++        return NULL;
++    }
++    *out_size = total;
++    ESP_LOGI(TAG, "EMU: loaded %u bundle bytes from flash 0x%X (no SD card)",
++             (unsigned)total, EMU_FLASH_PAYLOAD_OFFSET);
++    return psram_buf;
++}
++#endif
++
+ static void diag_sd_pins(void)
+ {
+     ESP_LOGI(TAG, "=== SD CARD PIN DIAGNOSTIC ===");
+@@ -145,6 +203,10 @@
+ 
+ uint8_t *load_firmware_from_sd(size_t *out_size)
+ {
++#ifdef EMU_FLASH_PAYLOAD
++    // Emulation path: no SD card in esp-emu, bundle comes from raw flash.
++    return load_firmware_from_flash_emu(out_size);
++#endif
+     sdmmc_card_t *card = mount_storage_sdcard();
+     if (card == NULL) {
+         ESP_LOGE(TAG, "Failed to mount SD card. Halting.");
+--- a/main/targets/esp32p4/storage_p4.c
++++ b/main/targets/esp32p4/storage_p4.c
+@@ -15,6 +15,64 @@
+ 
+ static const char *TAG = "SEEDSIGNER_LOADER";
+ 
++#ifdef EMU_FLASH_PAYLOAD
++// EMULATION-ONLY (scratch copy): the signed bundle is baked into raw flash at
++// EMU_FLASH_PAYLOAD_OFFSET (Specter header) so the ESP image inside lands at
++// 0x140000 (64KB-aligned, as the MMU mapping requires). Reads the bundle via
++// the ROM SPI-flash function instead of touching the (unemulated) SD card.
++#define EMU_FLASH_PAYLOAD_OFFSET 0x13FF00
++#include "esp_rom_spiflash.h"
++#include "bl_section.h"
++
++static uint8_t *load_firmware_from_flash_emu(size_t *out_size)
++{
++    bl_section_t main_hdr;
++    if (esp_rom_spiflash_read(EMU_FLASH_PAYLOAD_OFFSET,
++                              (uint32_t *)&main_hdr,
++                              sizeof(main_hdr)) != ESP_OK) {
++        ESP_LOGE(TAG, "EMU: failed to read bundle header from flash 0x%X. Halting.",
++                 EMU_FLASH_PAYLOAD_OFFSET);
++        return NULL;
++    }
++    if (main_hdr.magic != BL_SECT_MAGIC) {
++        ESP_LOGE(TAG, "EMU: no Specter header at flash 0x%X (magic 0x%08lX). Halting.",
++                 EMU_FLASH_PAYLOAD_OFFSET, (unsigned long)main_hdr.magic);
++        return NULL;
++    }
++    bl_section_t sig_hdr;
++    uint32_t sig_off = EMU_FLASH_PAYLOAD_OFFSET + sizeof(bl_section_t) + main_hdr.pl_size;
++    if (esp_rom_spiflash_read(sig_off, (uint32_t *)&sig_hdr, sizeof(sig_hdr)) != ESP_OK) {
++        ESP_LOGE(TAG, "EMU: failed to read signature header. Halting.");
++        return NULL;
++    }
++    if (sig_hdr.magic != BL_SECT_MAGIC || !blsect_is_signature(&sig_hdr)) {
++        ESP_LOGE(TAG, "EMU: signature section missing or invalid. Halting.");
++        return NULL;
++    }
++    size_t total = sizeof(bl_section_t) + main_hdr.pl_size
++                 + sizeof(bl_section_t) + sig_hdr.pl_size;
++    if (total == 0 || total > MAX_FIRMWARE_SIZE) {
++        ESP_LOGE(TAG, "EMU: invalid bundle size %u. Halting.", (unsigned)total);
++        return NULL;
++    }
++    uint8_t *psram_buf = heap_caps_aligned_alloc(65536, total, MALLOC_CAP_SPIRAM);
++    if (!psram_buf) {
++        ESP_LOGE(TAG, "EMU: PSRAM alloc failed (%u bytes). Halting.", (unsigned)total);
++        return NULL;
++    }
++    if (esp_rom_spiflash_read(EMU_FLASH_PAYLOAD_OFFSET,
++                              (uint32_t *)psram_buf, total) != ESP_OK) {
++        ESP_LOGE(TAG, "EMU: failed to read bundle from flash. Halting.");
++        free(psram_buf);
++        return NULL;
++    }
++    *out_size = total;
++    ESP_LOGI(TAG, "EMU: loaded %u bundle bytes from flash 0x%X (no SD card)",
++             (unsigned)total, EMU_FLASH_PAYLOAD_OFFSET);
++    return psram_buf;
++}
++#endif
++
+ // LDO4 powers the SDMMC IO domain. Retained statically so the unmount path
+ // can power the domain off (electrically TOCTOU-safe) instead of leaking it.
+ // Mirrors specter-bootloader-mike esp32p4_media.c + uploader_storage.c.
+@@ -84,6 +142,10 @@
+ 
+ uint8_t *load_firmware_from_sd(size_t *out_size)
+ {
++#ifdef EMU_FLASH_PAYLOAD
++    // Emulation path: no SD card in esp-emu, bundle comes from raw flash.
++    return load_firmware_from_flash_emu(out_size);
++#endif
+     sdmmc_card_t *card = mount_storage_sdcard();
+     if (card == NULL) {
+         ESP_LOGE(TAG, "No SD card. Halting.");
+--- a/main/targets/esp32p4/jump_p4.c
++++ b/main/targets/esp32p4/jump_p4.c
+@@ -208,6 +208,20 @@
+         }
+     }
+ 
++#ifdef EMU_FLASH_PAYLOAD
++    char m_emu_copy[] = "JMP[6.5] EMU: copying mapped segments to 0x48000000 identity\r\n";
++    bootloader_uart0_print(m_emu_copy);
++    for (int i = 0; i < safe_mapping_count; i++) {
++        uint8_t *dest = (uint8_t *)safe_mappings[i].vaddr;
++        uint8_t *src  = (uint8_t *)(0x48000000 + safe_mappings[i].paddr);
++        if (dest != src) {
++            for (uint32_t k = 0; k < safe_mappings[i].len; k++) {
++                dest[k] = src[k];
++            }
++        }
++    }
++#endif
++
+     // Invalidate caches through ROM API
+     extern void Cache_Invalidate_Addr(uint32_t map, uint32_t vaddr, uint32_t size);
+     for (int i = 0; i < safe_mapping_count; i++) {
+--- a/main/main.c
++++ b/main/main.c
+@@ -186,6 +186,7 @@
+     // ----------------------------------------------------------------
+     // Step 3: Anti-phishing tamper detection (fail-closed: any error halts)
+     // ----------------------------------------------------------------
++#ifndef EMU_SKIP_ANTI_PHISH
+     esp_err_t prov_err = provision_flash_fill();
+     if (prov_err != ESP_OK) {
+         ESP_LOGE(TAG, "Flash fill provisioning failed (%s). Halting.",
+@@ -201,6 +202,9 @@
+         memzero(psram_buf, fw_size);
+         while (1) vTaskDelay(1000 / portTICK_PERIOD_MS);
+     }
++#else
++    ESP_LOGW(TAG, "EMU: skipping anti-phishing flash fill & proof for fast testing.");
++#endif
+ 
+     // ----------------------------------------------------------------
+     // Steps 4-6: Parse ESP32 image, map PSRAM, and prepare direct copies
+--- a/main/CMakeLists.txt
++++ b/main/CMakeLists.txt
+@@ -48,3 +48,16 @@
+ 
+ # Relocate the loader's own segments / JMP trampoline via target linker script
+ target_linker_script(${COMPONENT_LIB} INTERFACE "${TARGET_LD}")
++
++# EMULATION-ONLY (scratch copy, never merged upstream): read the signed payload
++# from a raw flash offset instead of the SD card, so stateless boot can be
++# tested in esp-emu, which models no SD card. Enabled with EMU_FLASH_PAYLOAD=1
++# in the environment at configure time.
++if("$ENV{EMU_FLASH_PAYLOAD}" STREQUAL "1")
++    message(STATUS "Seedsigner loader: EMU_FLASH_PAYLOAD enabled (no SD card)")
++    target_compile_definitions(${COMPONENT_LIB} PRIVATE EMU_FLASH_PAYLOAD=1)
++    if(NOT "$ENV{EMU_NO_SKIP_ANTI_PHISH}" STREQUAL "1")
++        message(STATUS "Seedsigner loader: EMU_SKIP_ANTI_PHISH enabled (fast emulation)")
++        target_compile_definitions(${COMPONENT_LIB} PRIVATE EMU_SKIP_ANTI_PHISH=1)
++    endif()
++endif()

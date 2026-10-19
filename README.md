@@ -64,12 +64,14 @@ On ESP32-S3 modules with Octal PSRAM (`N8R8`), GPIOs 33–37 are reserved intern
 ## Layer 1: Secure-boot signing key (RSA)
 
 ```bash
-# ESP32-S3 requires RSA-3072 for Secure Boot V2:
+# Both targets select Secure Boot V2 with the RSA-3072 scheme
+# (CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME), so the key MUST be RSA-3072:
 espsecure.py generate_signing_key --version 2 --scheme rsa3072 secure_boot_signing_key.pem
-
-# ESP32-P4 (default RSA-3072):
-espsecure.py generate_signing_key secure_boot_signing_key.pem
 ```
+
+> Modern esptool defaults `generate_signing_key` to ECDSA-P256. An ECDSA key
+> makes the 2nd-stage bootloader reject every image with
+> "RSA signing scheme selected but signature block generated for ECDSA scheme".
 
 This key signs the bootloader and the loader image. Its digest is stored in the
 eFuse and checked at every boot. `sdkconfig.defaults` already references it via
@@ -188,6 +190,32 @@ Default port is `/dev/ttyACM0`; override with `ESPPORT=...`. Wait for the
 anti-phishing words and the MicroPython REPL prompt (`>>>`).
 
 To flash without rebuilding: `bash run.sh --target <target> flash`
+
+## Emulator test — full boot chain, no hardware (`tools/emu/`)
+
+`tools/emu/run_emu_ci.sh` builds a scratch copy of this repo with the
+emulation-only overlay `emu-flash-payload.patch` (signed bundle served from raw
+flash instead of the SD card, which esp-emu does not model), signs
+`PAYLOAD_BIN`, merges a flash image, boots it in
+[esp-emu](https://github.com/espressif/esp-emulator), injects CR-terminated
+MicroPython commands and checks the loader-signature/banner/REPL markers. The
+repo itself is never modified.
+
+```bash
+# one-shot local run (esp-emu >= 0.49 on PATH; ESP-IDF export sourced)
+PAYLOAD_BIN=build/<BOARD>/micropython.bin tools/emu/run_emu_ci.sh all s3
+
+# ESP32-P4 uses the rev-1.3 route matching the physical boards (rev0 ROM ELF +
+# rev1.3 virtual eFuse; pre-v3 MicroPython images do not execute on esp-emu's
+# default rev-3.1 model):
+P4_REV0_ROM=<...>/esp32p4_rev0_rom.elf \
+PAYLOAD_BIN=build/<BOARD>/micropython.bin tools/emu/run_emu_ci.sh all p4
+```
+
+`build`, `run`, and `all` can be split across steps/containers via `SCRATCH`
+(the merged image `SCRATCH/emu_<t>.bin` and log `SCRATCH/emu_<t>.log` land
+there). CI runs the same script in the `emulator-repl` job of
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) for both targets.
 
 ## Repository layout
 

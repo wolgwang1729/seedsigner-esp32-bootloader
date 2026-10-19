@@ -17,7 +17,7 @@ __pycache__/
 *.pyc
 
 # Secure boot signing key — dev-only, never commit. Generate your own with:
-#   espsecure.py generate_signing_key secure_boot_signing_key.pem
+#   espsecure.py generate_signing_key --version 2 secure_boot_signing_key.pem
 secure_boot_signing_key.pem
 
 # Vendor payload signing key — private, never commit. Generate with:
@@ -27,3 +27,6 @@ payload_signing_key.pem
 # Signed payload bundles — generated locally, never commit. Generate with:
 #   python3 tools/generate_signed_payload.py <micropython.bin> seedsigner_esp32p4.bin
 seedsigner_*.bin
+
+# Emulator scratch dir (tools/emu/run_emu_ci.sh / the emulator-repl CI job)
+emu-scratch/
