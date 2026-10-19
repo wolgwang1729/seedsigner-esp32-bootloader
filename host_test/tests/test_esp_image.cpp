@@ -51,10 +51,14 @@ static size_t append_seg(uint8_t *buf, size_t cap, size_t off, uint32_t vaddr,
 }
 
 #if CONFIG_IDF_TARGET_ESP32P4
-static constexpr uint32_t MMU_ADDR = 0x48010000U;
+// Low 16 bits mirror the segment's offset inside the raw image (0x20 for the
+// first segment), exactly as a real payload keeps them in (mod 64K) sync.
+static constexpr uint32_t MMU_ADDR = 0x48010020U;
+static constexpr uint32_t MMU_ADDR2 = MMU_ADDR + 0x10008U;
 static constexpr uint32_t SRAM_ADDR = 0x4FF00000U;
 #elif CONFIG_IDF_TARGET_ESP32S3
-static constexpr uint32_t MMU_ADDR = 0x42010000U;
+static constexpr uint32_t MMU_ADDR = 0x42010020U;
+static constexpr uint32_t MMU_ADDR2 = MMU_ADDR + 0x10008U;
 static constexpr uint32_t SRAM_ADDR = 0x3FC88000U;
 #else
 #error "host_test must define CONFIG_IDF_TARGET_ESP32P4 or ESP32S3"
@@ -152,9 +156,49 @@ TEST_CASE("esp_image_plan builds MMU + direct-copy plan") {
   uint32_t write_off = MMU_ADDR & SOC_MMU_LINEAR_ADDR_MASK;
 #endif
   REQUIRE(0 == memcmp(p.fake_flash + write_off, mmu_data, sizeof(mmu_data)));
+  // The 32-byte image prefix (image header + first segment header) is staged at
+  // the mapped page backing image offset 0 (commit 0361736), 0x20 bytes before
+  // the segment data, without disturbing the data itself.
+  REQUIRE(0 == memcmp(p.fake_flash + (write_off & ~0xFFFFu), buf, 32));
   // Direct copy still points into the source bundle.
   REQUIRE(p.direct_copies[0].len == sizeof(sram_data));
   REQUIRE(0 == memcmp(p.direct_copies[0].src, sram_data, sizeof(sram_data)));
+  free_plan(p);
+}
+
+TEST_CASE("esp_image_plan stamps the image prefix only on the page backing offset 0") {
+  // Mirrors the shipped payloads: the first segment's data starts at image
+  // offset 0x20, so the page holding it backs image offset 0 and must show the
+  // 32-byte image prefix. A later segment on another page must keep the real
+  // image content its page is supposed to show.
+  uint8_t buf[1 << 20]{};
+  size_t off = build_hdr(buf, sizeof(buf), 2);
+  uint8_t first[0x10000];
+  uint8_t second[16];
+  for (size_t i = 0; i < sizeof(first); ++i) {
+    first[i] = (uint8_t)i;
+  }
+  for (int i = 0; i < 16; ++i) {
+    second[i] = (uint8_t)(0x30 + i);
+  }
+  off = append_seg(buf, sizeof(buf), off, MMU_ADDR, first, sizeof(first));
+  off = append_seg(buf, sizeof(buf), off, MMU_ADDR2, second, sizeof(second));
+
+  image_plan_t p = esp_image_plan(buf, 0, off);
+  REQUIRE(!p.fatal);
+  REQUIRE(p.mmu_mapping_count == 2);
+#if CONFIG_IDF_TARGET_ESP32P4
+  uint32_t w0 = MMU_ADDR - 0x48000000U;
+  uint32_t w1 = MMU_ADDR2 - 0x48000000U;
+#elif CONFIG_IDF_TARGET_ESP32S3
+  uint32_t w0 = MMU_ADDR & SOC_MMU_LINEAR_ADDR_MASK;
+  uint32_t w1 = MMU_ADDR2 & SOC_MMU_LINEAR_ADDR_MASK;
+#endif
+  // First segment: prefix at the page start, data intact right after it.
+  REQUIRE(0 == memcmp(p.fake_flash + (w0 & ~0xFFFFu), buf, 32));
+  REQUIRE(0 == memcmp(p.fake_flash + w0, first, sizeof(first)));
+  // Later page: real image content (tail of the first segment), not the prefix.
+  REQUIRE(0 == memcmp(p.fake_flash + (w1 & ~0xFFFFu), first + 0xFFE0, 32));
   free_plan(p);
 }
 
