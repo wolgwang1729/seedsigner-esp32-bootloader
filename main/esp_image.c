@@ -154,6 +154,7 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset,
 
     // Step 6: second pass — place segments and build MMU map.
     offset = sizeof(esp_image_header_t);
+    uint32_t last_page_start = 0xFFFFFFFF;
 
     for (int i = 0; i < hdr.segment_count; i++) {
         if (offset + sizeof(esp_image_segment_header_t) > fw_size - payload_offset) {
@@ -200,6 +201,15 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset,
                 IMAGE_FATAL_RETURN();
             }
             memcpy(plan.fake_flash + write_off, psram_buf + payload_offset + offset, seg.data_len);
+
+            // Stage the image header (32 B) at the mapped page start, as a real flash
+            // boot would see it: system_early_init() reads esp_image_header_t from
+            // &_rodata_reserved_start - 32, which lands in this mapped window.
+            uint32_t page_start = write_off & ~0xFFFF;
+            if (page_start != last_page_start) {
+                memcpy(plan.fake_flash + page_start, psram_buf + payload_offset, 32);
+                last_page_start = page_start;
+            }
             plan.mmu_mapping_count++;
             ESP_LOGI(TAG, "  -> fake_flash+0x%lX", (unsigned long)write_off);
         } else if ((seg.load_addr >= 0x4FF00000 && seg.load_addr < 0x4FFC0000) ||
@@ -252,6 +262,15 @@ image_plan_t esp_image_plan(const uint8_t *psram_buf, uint32_t payload_offset,
                 IMAGE_FATAL_RETURN();
             }
             memcpy(plan.fake_flash + write_off, psram_buf + payload_offset + offset, seg.data_len);
+
+            // Stage the image header (32 B) at the mapped page start, as a real flash
+            // boot would see it: system_early_init() reads esp_image_header_t from
+            // &_rodata_reserved_start - 32, which lands in this mapped window.
+            uint32_t page_start = write_off & ~0xFFFF;
+            if (page_start != last_page_start) {
+                memcpy(plan.fake_flash + page_start, psram_buf + payload_offset, 32);
+                last_page_start = page_start;
+            }
             plan.mmu_mapping_count++;
             ESP_LOGI(TAG, "  -> fake_flash+0x%lX", (unsigned long)write_off);
         } else if ((seg.load_addr >= 0x40370000 && seg.load_addr < 0x403E0000) ||
