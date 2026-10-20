@@ -154,29 +154,6 @@
      sdmmc_card_t *card = mount_storage_sdcard();
      if (card == NULL) {
          ESP_LOGE(TAG, "No SD card. Halting.");
---- a/main/targets/esp32p4/jump_p4.c
-+++ b/main/targets/esp32p4/jump_p4.c
-@@ -208,6 +208,20 @@
-         }
-     }
- 
-+#ifdef EMU_FLASH_PAYLOAD
-+    char m_emu_copy[] = "JMP[6.5] EMU: copying mapped segments to 0x48000000 identity\r\n";
-+    bootloader_uart0_print(m_emu_copy);
-+    for (int i = 0; i < safe_mapping_count; i++) {
-+        uint8_t *dest = (uint8_t *)safe_mappings[i].vaddr;
-+        uint8_t *src  = (uint8_t *)(0x48000000 + safe_mappings[i].paddr);
-+        if (dest != src) {
-+            for (uint32_t k = 0; k < safe_mappings[i].len; k++) {
-+                dest[k] = src[k];
-+            }
-+        }
-+    }
-+#endif
-+
-     // Invalidate caches through ROM API
-     extern void Cache_Invalidate_Addr(uint32_t map, uint32_t vaddr, uint32_t size);
-     for (int i = 0; i < safe_mapping_count; i++) {
 --- a/main/main.c
 +++ b/main/main.c
 @@ -186,6 +186,7 @@
